@@ -5,7 +5,6 @@
 // ─────────────────────────────────────────────
 
 const firebaseConfig = {
-
   apiKey: "AIzaSyDJfNrBt2woGdjcya0GyQ9Q6kSQq59YkOY",
   authDomain: "fittracker-pro-c9a8d.firebaseapp.com",
   projectId: "fittracker-pro-c9a8d",
