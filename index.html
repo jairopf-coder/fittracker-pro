@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#0d0f14" />
+  <title>FitTracker Pro</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+     LOGIN
+═══════════════════════════════════════════ -->
+<div id="page-login" class="page-login hidden">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="logo-icon">⚡</div>
+      <h1>FitTracker Pro</h1>
+      <p>Gestión de entrenamiento personal</p>
+    </div>
+    <div id="login-error" class="alert alert-error hidden"></div>
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" id="login-email" placeholder="tu@email.com" autocomplete="email" />
+    </div>
+    <div class="form-group">
+      <label>Contraseña</label>
+      <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" />
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doLogin()">Entrar</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     APP SHELL
+═══════════════════════════════════════════ -->
+<div id="app" class="app hidden">
+
+  <!-- Top bar (mobile) -->
+  <header class="topbar">
+    <div class="topbar-logo">
+      <span class="logo-bolt">⚡</span>
+      <span class="logo-name">FitTracker</span>
+    </div>
+    <div class="topbar-right">
+      <span id="topbar-badge" class="topbar-badge hidden"></span>
+      <button class="hamburger" onclick="toggleSidebar()" aria-label="Menú">☰</button>
+    </div>
+  </header>
+
+  <!-- Sidebar overlay -->
+  <div id="sidebar-overlay" class="sidebar-overlay" onclick="closeSidebar()"></div>
+
+  <!-- Sidebar -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-logo">
+      <span class="logo-bolt">⚡</span>
+      <div>
+        <span class="logo-name">FitTracker</span>
+        <span class="logo-sub">Pro</span>
+      </div>
+      <button class="sidebar-close" onclick="closeSidebar()">✕</button>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
+        <span class="nav-icon">🏠</span><span class="nav-label">Dashboard</span>
+        <span id="nav-badge" class="nav-badge hidden"></span>
+      </button>
+      <button class="nav-item" data-page="clientes" onclick="navigate('clientes')">
+        <span class="nav-icon">👥</span><span class="nav-label">Clientes</span>
+      </button>
+      <button class="nav-item" data-page="calendario" onclick="navigate('calendario')">
+        <span class="nav-icon">📅</span><span class="nav-label">Calendario</span>
+      </button>
+      <button class="nav-item" data-page="pagos" onclick="navigate('pagos')">
+        <span class="nav-icon">💰</span><span class="nav-label">Pagos</span>
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="nav-item logout-btn" onclick="doLogout()">
+        <span class="nav-icon">🚪</span><span class="nav-label">Salir</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main id="main-content" class="main-content">
+
+    <!-- ── DASHBOARD ── -->
+    <div id="page-dashboard" class="page">
+      <div class="page-header">
+        <h1>Dashboard</h1>
+        <span id="dash-date" class="date-badge"></span>
+      </div>
+      <div id="dash-alerts"></div>
+      <div class="stats-grid" id="dash-stats"></div>
+      <div class="section">
+        <div class="section-header">
+          <h2>Sesiones de Hoy</h2>
+          <button class="btn btn-sm btn-primary" onclick="navigate('calendario')">Ver calendario</button>
+        </div>
+        <div id="dash-today"></div>
+      </div>
+      <div class="section">
+        <div class="section-header">
+          <h2>Estado de Bonos</h2>
+          <button class="btn btn-sm btn-outline" onclick="navigate('clientes')">Ver todos</button>
+        </div>
+        <div id="dash-bonos" class="bono-list"></div>
+      </div>
+    </div>
+
+    <!-- ── CLIENTES ── -->
+    <div id="page-clientes" class="page hidden">
+      <div class="page-header">
+        <h1>Clientes</h1>
+        <button class="btn btn-primary" onclick="openClientModal()">+ Nuevo cliente</button>
+      </div>
+      <div class="toolbar">
+        <input class="search-input" type="search" placeholder="Buscar..." oninput="renderClientes()" id="client-search" />
+        <div class="filter-tabs">
+          <button class="filter-tab active" data-filter="all" onclick="setClientFilter('all')">Todos</button>
+          <button class="filter-tab" data-filter="active" onclick="setClientFilter('active')">Activos</button>
+          <button class="filter-tab" data-filter="alert" onclick="setClientFilter('alert')">⚠️ Alertas</button>
+        </div>
+      </div>
+      <div id="clients-grid" class="clients-grid"></div>
+    </div>
+
+    <!-- ── CALENDARIO ── -->
+    <div id="page-calendario" class="page hidden">
+      <div class="page-header">
+        <h1>Calendario</h1>
+        <div class="week-nav">
+          <button class="btn btn-outline btn-sm" onclick="changeWeek(-1)">← Ant</button>
+          <span id="week-label" class="week-label"></span>
+          <button class="btn btn-outline btn-sm" onclick="changeWeek(1)">Sig →</button>
+          <button class="btn btn-sm btn-primary" onclick="goToday()">Hoy</button>
+        </div>
+      </div>
+      <div class="calendar-wrapper">
+        <div id="calendar-grid" class="calendar-grid"></div>
+      </div>
+    </div>
+
+    <!-- ── PAGOS ── -->
+    <div id="page-pagos" class="page hidden">
+      <div class="page-header">
+        <h1>Pagos</h1>
+        <div class="month-nav">
+          <button class="btn btn-outline btn-sm" onclick="changeMonth(-1)">← Ant</button>
+          <span id="month-label" class="month-label"></span>
+          <button class="btn btn-outline btn-sm" onclick="changeMonth(1)">Sig →</button>
+        </div>
+      </div>
+      <div id="payments-summary" class="stats-grid" style="margin-bottom:24px"></div>
+      <div id="payments-list" class="payments-list"></div>
+    </div>
+
+  </main>
+
+  <!-- Bottom nav (phones) -->
+  <nav class="bottom-nav">
+    <button class="bottom-nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
+      <span class="nav-icon">🏠</span><span>Dashboard</span>
+      <span id="bottom-badge" class="bottom-badge hidden"></span>
+    </button>
+    <button class="bottom-nav-item" data-page="clientes" onclick="navigate('clientes')">
+      <span class="nav-icon">👥</span><span>Clientes</span>
+    </button>
+    <button class="bottom-nav-item" data-page="calendario" onclick="navigate('calendario')">
+      <span class="nav-icon">📅</span><span>Calendario</span>
+    </button>
+    <button class="bottom-nav-item" data-page="pagos" onclick="navigate('pagos')">
+      <span class="nav-icon">💰</span><span>Pagos</span>
+    </button>
+  </nav>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     MODALS
+═══════════════════════════════════════════ -->
+
+<!-- Modal Cliente -->
+<div id="modal-client" class="modal-overlay hidden" onclick="closeModalClient(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-client-title">Nuevo Cliente</h2>
+      <button class="close-btn" onclick="closeModalClient()">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="client-id" />
+      <div class="form-row">
+        <div class="form-group">
+          <label>Nombre *</label>
+          <input id="c-name" placeholder="Nombre completo" />
+        </div>
+        <div class="form-group">
+          <label>Teléfono</label>
+          <input id="c-phone" placeholder="600 000 000" type="tel" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input id="c-email" placeholder="cliente@email.com" type="email" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Tipo de pago</label>
+          <select id="c-payment-type" onchange="toggleBonoFields()">
+            <option value="bono">Bono de sesiones</option>
+            <option value="mensual">Mensual</option>
+            <option value="individual">Sesión individual</option>
+          </select>
+        </div>
+        <div class="form-group" id="bono-size-group">
+          <label>Sesiones del bono</label>
+          <input id="c-bono-size" type="number" value="10" min="1" />
+        </div>
+        <div class="form-group" id="sessions-left-group">
+          <label>Sesiones restantes</label>
+          <input id="c-sessions-left" type="number" value="10" min="0" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Notas</label>
+        <textarea id="c-notes" placeholder="Objetivos, observaciones..."></textarea>
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="c-active" checked />
+          Cliente activo
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-delete-client" class="btn btn-danger btn-sm hidden" onclick="deleteClient()">🗑️ Eliminar</button>
+      <button class="btn btn-outline" onclick="closeModalClient()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveClient()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Sesión (Calendario) -->
+<div id="modal-slot" class="modal-overlay hidden" onclick="closeModalSlot(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-slot-title">Nueva Sesión</h2>
+      <button class="close-btn" onclick="closeModalSlot()">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="slot-id" />
+      <div class="form-group">
+        <label>Tipo</label>
+        <select id="s-type" onchange="toggleSlotFields()">
+          <option value="client">Sesión con cliente</option>
+          <option value="block">Bloqueado</option>
+          <option value="free">Libre</option>
+        </select>
+      </div>
+      <div class="form-group" id="slot-client-group">
+        <label>Cliente</label>
+        <select id="s-client"></select>
+      </div>
+      <div class="form-group hidden" id="slot-title-group">
+        <label>Título</label>
+        <input id="s-title" placeholder="Ej: Reunión..." />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Fecha</label>
+          <input type="date" id="s-date" />
+        </div>
+        <div class="form-group">
+          <label>Hora</label>
+          <select id="s-hour"></select>
+        </div>
+        <div class="form-group">
+          <label>Duración</label>
+          <select id="s-duration">
+            <option value="30">30 min</option>
+            <option value="45">45 min</option>
+            <option value="60" selected>1 hora</option>
+            <option value="90">1:30 h</option>
+            <option value="120">2 horas</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Notas</label>
+        <input id="s-notes" placeholder="Observaciones..." />
+      </div>
+      <div class="form-group" id="slot-status-group" style="display:none">
+        <label>Estado</label>
+        <select id="s-status">
+          <option value="scheduled">Programada</option>
+          <option value="completed">Completada</option>
+          <option value="cancelled">Cancelada</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-delete-slot" class="btn btn-danger btn-sm hidden" onclick="deleteSlot()">🗑️ Eliminar</button>
+      <button id="btn-complete-slot" class="btn btn-success btn-sm hidden" onclick="completeSlot()">✅ Completar</button>
+      <button class="btn btn-outline" onclick="closeModalSlot()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveSlot()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Pago -->
+<div id="modal-payment" class="modal-overlay hidden" onclick="closeModalPayment(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Registrar Pago</h2>
+      <button class="close-btn" onclick="closeModalPayment()">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="payment-id" />
+      <div class="form-group">
+        <label>Cliente</label>
+        <select id="p-client"></select>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Importe (€)</label>
+          <input id="p-amount" type="number" min="0" step="0.01" placeholder="0.00" />
+        </div>
+        <div class="form-group">
+          <label>Fecha</label>
+          <input type="date" id="p-date" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Concepto</label>
+          <select id="p-concept">
+            <option value="bono">Bono de sesiones</option>
+            <option value="mensual">Mensualidad</option>
+            <option value="individual">Sesión individual</option>
+            <option value="otro">Otro</option>
+          </select>
+        </div>
+        <div class="form-group" id="p-bono-group">
+          <label>Sesiones del bono</label>
+          <input id="p-sessions" type="number" min="1" value="10" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Notas</label>
+        <input id="p-notes" placeholder="Observaciones..." />
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-delete-payment" class="btn btn-danger btn-sm hidden" onclick="deletePayment()">🗑️ Eliminar</button>
+      <button class="btn btn-outline" onclick="closeModalPayment()">Cancelar</button>
+      <button class="btn btn-primary" onclick="savePayment()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     FIREBASE + APP JS
+═══════════════════════════════════════════ -->
+<script src="firebase-config.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
