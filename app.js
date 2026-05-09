@@ -839,10 +839,81 @@ window.changeMonth = function (dir) {
   renderPagos();
 };
 
+// ── Payment selection state ───────────────────────────────
+let selectedPaymentIds = new Set();
+
+function updateSelectionBadge() {
+  const badge = document.getElementById('selection-badge');
+  if (!badge) return;
+  const n = selectedPaymentIds.size;
+  if (n > 0) {
+    badge.textContent = `${n} seleccionado${n > 1 ? 's' : ''}`;
+    badge.classList.add('visible');
+  } else {
+    badge.classList.remove('visible');
+  }
+}
+
+function togglePaymentSelection(e, id) {
+  e.stopPropagation();
+  if (selectedPaymentIds.has(id)) {
+    selectedPaymentIds.delete(id);
+  } else {
+    selectedPaymentIds.add(id);
+  }
+  const row = document.querySelector(`.payment-row[data-id="${id}"]`);
+  if (row) row.classList.toggle('selected', selectedPaymentIds.has(id));
+  updateSelectionBadge();
+}
+
+window.exportPaymentsCSV = function () {
+  const y = currentMonth.getFullYear();
+  const m = currentMonth.getMonth();
+  const monthPayments = payments.filter(p => {
+    const d = toDate(p.date);
+    return d.getFullYear() === y && d.getMonth() === m;
+  });
+
+  // Export selected rows if any, otherwise export all visible
+  const toExport = selectedPaymentIds.size > 0
+    ? monthPayments.filter(p => selectedPaymentIds.has(p.id))
+    : monthPayments;
+
+  if (toExport.length === 0) { alert('No hay pagos para exportar'); return; }
+
+  const headers = ['Fecha', 'Cliente', 'Concepto', 'Importe (€)', 'Sesiones', 'Notas'];
+  const rows = toExport.map(p => {
+    const client = clients.find(c => c.id === p.clientId);
+    const name   = client ? client.name : 'Cliente desconocido';
+    const d      = toDate(p.date).toLocaleDateString('es-ES');
+    const concept = conceptLabel(p.concept);
+    const amount  = (p.amount || 0).toFixed(2);
+    const sessions = p.concept === 'bono' ? (p.sessions || 0) : '';
+    const notes   = (p.notes || '').replace(/"/g, '""');
+    return `"${d}","${name}","${concept}","${amount}","${sessions}","${notes}"`;
+  });
+
+  const monthStr = currentMonth.toLocaleDateString('es-ES', { month:'long', year:'numeric' });
+  const csvContent = [headers.join(','), ...rows].join('\n');
+  const bom = '\uFEFF'; // UTF-8 BOM for Excel
+  const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `pagos_${monthStr.replace(/ /g, '_')}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
 function renderPagos() {
   const y = currentMonth.getFullYear();
   const m = currentMonth.getMonth();
   $('month-label').textContent = currentMonth.toLocaleDateString('es-ES', { month:'long', year:'numeric' });
+
+  // Reset selection on month change
+  selectedPaymentIds.clear();
 
   const monthPayments = payments.filter(p => {
     const d = toDate(p.date);
@@ -861,8 +932,16 @@ function renderPagos() {
   `;
 
   const listEl = $('payments-list');
-  let html = `<div style="margin-bottom:16px">
-    <button class="btn btn-primary" onclick="openPaymentModal()">+ Registrar pago</button>
+  let html = `<div class="payments-toolbar">
+    <div class="payments-toolbar-left">
+      <button class="btn btn-primary btn-sm" onclick="openPaymentModal()">+ Registrar pago</button>
+      <span class="selection-badge" id="selection-badge"></span>
+    </div>
+    <div class="payments-toolbar-right">
+      <button class="btn btn-outline btn-sm btn-export" onclick="exportPaymentsCSV()" title="Exportar CSV del mes">
+        ⬇️ Exportar CSV
+      </button>
+    </div>
   </div>`;
 
   if (monthPayments.length === 0) {
@@ -872,7 +951,11 @@ function renderPagos() {
       const client = clients.find(c => c.id === p.clientId);
       const name   = client ? client.name : 'Cliente desconocido';
       const d      = toDate(p.date);
-      return `<div class="payment-row" onclick="openPaymentModal('${p.id}')">
+      const isSelected = selectedPaymentIds.has(p.id);
+      return `<div class="payment-row${isSelected ? ' selected' : ''}" data-id="${p.id}" onclick="openPaymentModal('${p.id}')">
+        <div class="payment-checkbox-wrap" onclick="togglePaymentSelection(event, '${p.id}')">
+          <input type="checkbox" class="payment-checkbox" ${isSelected ? 'checked' : ''} tabindex="-1" />
+        </div>
         <div class="payment-icon">💳</div>
         <div class="payment-info">
           <strong>${esc(name)}</strong>

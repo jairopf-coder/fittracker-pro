@@ -154,6 +154,8 @@
         <div class="cal-legend-item"><div class="cal-legend-dot ld-pending"></div> Pendiente confirmación</div>
         <div class="cal-legend-item"><div class="cal-legend-dot ld-cancelled"></div> Cancelada</div>
       </div>
+      <!-- Week summary -->
+      <div id="week-summary" class="week-summary"></div>
     </div>
 
     <!-- ── PAGOS ── -->
@@ -428,5 +430,69 @@
 ═══════════════════════════════════════════ -->
 <script src="firebase-config.js"></script>
 <script type="module" src="app.js"></script>
+<!-- Calendar event tooltip -->
+<div id="cal-tooltip" role="tooltip" aria-hidden="true"></div>
+<script>
+  (function() {
+    const tip = document.getElementById('cal-tooltip');
+    const statusClass = {
+      'Programada': 's-scheduled',
+      'Completada': 's-completed',
+      'Pendiente confirmación': 's-pending',
+      'Cancelada': 's-cancelled'
+    };
+    let hideTimer;
+
+    function showTooltip(el, e) {
+      clearTimeout(hideTimer);
+      const name   = el.dataset.tooltipName   || '';
+      const time   = el.dataset.tooltipTime   || '';
+      const dur    = el.dataset.tooltipDur    || '';
+      const status = el.dataset.tooltipStatus || '';
+      const sCls   = statusClass[status] || 's-scheduled';
+      tip.innerHTML = `
+        <div class="tt-name">${name}</div>
+        <div class="tt-row"><span>🕐</span><span>${time}</span></div>
+        <div class="tt-row"><span>⏱</span><span>${dur}</span></div>
+        <span class="tt-status ${sCls}">${status}</span>`;
+      positionTooltip(e);
+      tip.classList.add('visible');
+      tip.setAttribute('aria-hidden', 'false');
+    }
+
+    function positionTooltip(e) {
+      const margin = 12;
+      const tw = tip.offsetWidth || 200;
+      const th = tip.offsetHeight || 100;
+      let x = e.clientX + margin;
+      let y = e.clientY + margin;
+      if (x + tw > window.innerWidth  - margin) x = e.clientX - tw - margin;
+      if (y + th > window.innerHeight - margin) y = e.clientY - th - margin;
+      tip.style.left = x + 'px';
+      tip.style.top  = y + 'px';
+    }
+
+    function hideTooltip() {
+      hideTimer = setTimeout(() => {
+        tip.classList.remove('visible');
+        tip.setAttribute('aria-hidden', 'true');
+      }, 80);
+    }
+
+    document.addEventListener('mouseover', e => {
+      const el = e.target.closest('[data-tooltip-name]');
+      if (el) showTooltip(el, e);
+      else if (!tip.contains(e.target)) hideTooltip();
+    });
+    document.addEventListener('mousemove', e => {
+      if (tip.classList.contains('visible')) positionTooltip(e);
+    });
+    document.addEventListener('mouseout', e => {
+      if (!e.relatedTarget?.closest('[data-tooltip-name]')) hideTooltip();
+    });
+    document.addEventListener('click', hideTooltip);
+    document.addEventListener('scroll', hideTooltip, true);
+  })();
+</script>
 </body>
 </html>
