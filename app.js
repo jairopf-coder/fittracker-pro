@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  FITTRACKER PRO  — app.js
+//  FITTRACKER PRO  — app.js  v2
 // ═══════════════════════════════════════════════════════════
 
 import { initializeApp }          from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
@@ -27,7 +27,6 @@ let editingClient  = null;
 let editingSlot    = null;
 let editingPayment = null;
 
-// Unsubs for Firestore listeners
 const unsubs = {};
 
 // ═══════════════════════════════════════════════════════════
@@ -59,7 +58,6 @@ window.doLogout = async function () {
   await signOut(auth);
 };
 
-// Enter key on login
 document.getElementById('login-password').addEventListener('keydown', e => {
   if (e.key === 'Enter') doLogin();
 });
@@ -108,15 +106,12 @@ function refreshAll() {
 // ═══════════════════════════════════════════════════════════
 window.navigate = function (page) {
   currentPage = page;
-  // pages
   ['dashboard','clientes','calendario','pagos'].forEach(p => {
     toggleClass(`page-${p}`, 'hidden', p !== page);
   });
-  // nav active — sidebar
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
   });
-  // nav active — bottom nav
   document.querySelectorAll('.bottom-nav-item[data-page]').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
   });
@@ -141,7 +136,6 @@ window.closeSidebar = function () {
 function renderDashboard() {
   if (currentPage !== 'dashboard') return;
 
-  // Date badge
   $('dash-date').textContent = new Date().toLocaleDateString('es-ES', { weekday:'long', day:'numeric', month:'long' });
 
   const activeClients = clients.filter(c => c.active);
@@ -151,7 +145,6 @@ function renderDashboard() {
   const alerts = clients.filter(c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= 2);
   updateBadges(alerts.length);
 
-  // Render alerts
   const alertsEl = $('dash-alerts');
   if (alerts.length === 0) {
     alertsEl.innerHTML = '';
@@ -174,7 +167,7 @@ function renderDashboard() {
       </div>`;
   }
 
-  // Stats
+  // Contar sesiones de hoy (excluye canceladas)
   const todaySlots = slots.filter(s => {
     const d = toDate(s.date);
     return isToday(d) && s.status !== 'cancelled';
@@ -191,21 +184,23 @@ function renderDashboard() {
     <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-value">${totalRevenue.toFixed(0)}€</div><div class="stat-label">Total facturado</div></div>
   `;
 
-  // Today sessions
+  // Today sessions (incluye pendientes y canceladas para visibilidad)
+  const todayAll = slots.filter(s => isToday(toDate(s.date)));
   const todayEl = $('dash-today');
-  if (todaySlots.length === 0) {
+  if (todayAll.length === 0) {
     todayEl.innerHTML = `<div class="empty-state"><span>🏖️</span><p>Sin sesiones hoy</p></div>`;
   } else {
     todayEl.innerHTML = `<div class="session-list">
-      ${todaySlots.sort((a,b) => toDate(a.date)-toDate(b.date)).map(s => {
+      ${todayAll.sort((a,b) => toDate(a.date)-toDate(b.date)).map(s => {
         const client = clients.find(c => c.id === s.clientId);
         const name   = client ? client.name : (s.title || 'Bloqueado');
-        const icon   = s.status === 'completed' ? '✅' : s.status === 'cancelled' ? '❌' : '⏳';
-        return `<div class="session-item ${s.status === 'completed' ? 'completed' : ''}">
+        const icon   = statusIcon(s.status);
+        const cls    = s.status === 'completed' ? 'completed' : s.status === 'pending' ? 'pending' : s.status === 'cancelled' ? 'cancelled' : '';
+        return `<div class="session-item ${cls}">
           <div class="session-time">${formatTime(toDate(s.date))}</div>
           <div class="session-info">
             <strong>${esc(name)}</strong>
-            <span>${s.notes || (client ? `${client.sessionsLeft || 0} sesiones restantes` : '')}</span>
+            <span>${statusLabel(s.status)}${s.notes ? ' · ' + esc(s.notes) : ''}</span>
           </div>
           <div class="session-status">${icon}</div>
         </div>`;
@@ -376,14 +371,12 @@ function renderCalendario() {
     return d;
   });
 
-  // Label
   const opts = { day:'numeric', month:'short' };
   $('week-label').textContent =
     `${days[0].toLocaleDateString('es-ES', opts)} – ${days[6].toLocaleDateString('es-ES', { ...opts, year:'numeric' })}`;
 
   const grid = $('calendar-grid');
   const today = new Date(); today.setHours(0,0,0,0);
-
   const DAYS_ES = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
 
   let html = `<div class="cal-corner"></div>`;
@@ -403,18 +396,24 @@ function renderCalendario() {
         return sd.getFullYear() === day.getFullYear()
             && sd.getMonth()    === day.getMonth()
             && sd.getDate()     === day.getDate()
-            && sd.getHours()    === hour
-            && s.status         !== 'cancelled';
+            && sd.getHours()    === hour;
+        // Nota: mostramos TODOS los estados, incluyendo canceladas (con estilo diferente)
       });
       const isT = day.getTime() === today.getTime();
       html += `<div class="cal-cell ${isT ? 'today-col' : ''}" onclick="handleCellClick(${dayIdx},${hour},event)">
         ${cellSlots.map(s => {
           const client = clients.find(c => c.id === s.clientId);
           const label  = client ? client.name : (s.title || 'Bloqueado');
-          return `<div class="cal-event type-${s.type || 'client'} ${s.status === 'completed' ? 'done' : ''}"
+          const status = s.status || 'scheduled';
+          const statusCls = status === 'completed' ? 'status-completed'
+                          : status === 'pending'   ? 'status-pending'
+                          : status === 'cancelled' ? 'status-cancelled'
+                          : '';
+          return `<div class="cal-event type-${s.type || 'client'} ${statusCls}"
             onclick="openSlotModal('${s.id}',event)"
+            title="${esc(label)} · ${statusLabel(status)}"
             style="height:${Math.max(20, (s.duration || 60) / 60 * 52 - 4)}px">
-            ${esc(label)}
+            <span class="ev-label">${esc(label)}</span>
           </div>`;
         }).join('')}
       </div>`;
@@ -465,6 +464,7 @@ window.openSlotModal = function (id, e, prefillDate, prefillHour) {
     $('s-status').value   = editingSlot.status || 'scheduled';
     $('s-title').value    = editingSlot.title || '';
     $('slot-status-group').style.display = 'block';
+    $('repeat-section').style.display = 'none';
     show('btn-delete-slot');
     if (editingSlot.clientId && editingSlot.status !== 'completed') show('btn-complete-slot');
     else hide('btn-complete-slot');
@@ -476,8 +476,21 @@ window.openSlotModal = function (id, e, prefillDate, prefillHour) {
     $('s-status').value   = 'scheduled';
     $('s-title').value    = '';
     $('slot-status-group').style.display = 'none';
+    $('repeat-section').style.display = 'block';
     hide('btn-delete-slot');
     hide('btn-complete-slot');
+    // Reset repetición
+    $('s-repeat').checked = false;
+    hide('repeat-box');
+    // Desmarcar todos los días
+    document.querySelectorAll('.day-btn').forEach(b => b.classList.remove('selected'));
+    // Pre-seleccionar el día de la fecha elegida
+    if (prefillDate) {
+      const [y, m, d] = prefillDate.split('-').map(Number);
+      const wd = new Date(y, m-1, d).getDay();
+      const btn = document.querySelector(`.day-btn[data-day="${wd}"]`);
+      if (btn) btn.classList.add('selected');
+    }
   }
   toggleSlotFields();
   show('modal-slot');
@@ -489,6 +502,22 @@ window.toggleSlotFields = function () {
   toggleClass('slot-title-group',  'hidden', type === 'client');
 };
 
+window.toggleRepeatBox = function () {
+  const checked = $('s-repeat').checked;
+  toggleClass('repeat-box', 'hidden', !checked);
+};
+
+window.toggleDayBtn = function (btn) {
+  btn.classList.toggle('selected');
+};
+
+// Bind day buttons
+document.getElementById('days-picker').addEventListener('click', e => {
+  const btn = e.target.closest('.day-btn');
+  if (btn) btn.classList.toggle('selected');
+});
+
+// ── Save Slot ─────────────────────────────────────────────
 window.saveSlot = async function () {
   const type   = $('s-type').value;
   const dateStr = $('s-date').value;
@@ -496,13 +525,12 @@ window.saveSlot = async function () {
   if (!dateStr) { alert('Selecciona una fecha'); return; }
 
   const [y, m, d] = dateStr.split('-').map(Number);
-  const date = new Date(y, m-1, d, hour, 0, 0);
+  const baseDate  = new Date(y, m-1, d, hour, 0, 0);
 
-  const data = {
+  const baseData = {
     type,
     clientId:  type === 'client' ? ($('s-client').value || null) : null,
     title:     type !== 'client' ? $('s-title').value.trim() : '',
-    date:      Timestamp.fromDate(date),
     duration:  parseInt($('s-duration').value),
     notes:     $('s-notes').value.trim(),
     status:    editingSlot ? $('s-status').value : 'scheduled',
@@ -510,11 +538,70 @@ window.saveSlot = async function () {
   };
 
   if (editingSlot) {
-    await updateDoc(doc(db, 'slots', editingSlot.id), data);
-  } else {
-    data.createdAt = Timestamp.now();
-    await addDoc(collection(db, 'slots'), data);
+    // Solo actualiza esta sesión
+    baseData.date = Timestamp.fromDate(new Date(y, m-1, d, hour, 0, 0));
+    await updateDoc(doc(db, 'slots', editingSlot.id), baseData);
+    closeModalSlot();
+    return;
   }
+
+  // ── Nueva sesión ──────────────────────────────────────
+  const isRepeat = $('s-repeat').checked;
+
+  if (!isRepeat) {
+    // Sesión única
+    await addDoc(collection(db, 'slots'), {
+      ...baseData,
+      date: Timestamp.fromDate(baseDate),
+      createdAt: Timestamp.now(),
+    });
+  } else {
+    // Sesión repetida
+    const weeks = parseInt($('s-weeks').value) || 8;
+    const selectedDays = Array.from(document.querySelectorAll('.day-btn.selected'))
+      .map(b => parseInt(b.dataset.day));
+
+    if (selectedDays.length === 0) {
+      alert('Selecciona al menos un día de la semana para repetir.');
+      return;
+    }
+
+    // Generar todas las fechas: para cada semana, para cada día seleccionado
+    const dates = [];
+    for (let w = 0; w < weeks; w++) {
+      for (const wd of selectedDays) {
+        // Calcular la fecha del próximo "wd" a partir de baseDate + w semanas
+        const ref = new Date(baseDate);
+        ref.setDate(ref.getDate() + w * 7);
+        // Ajustar al día de semana correcto dentro de esa semana
+        const refWd  = ref.getDay();
+        const diff   = wd - refWd;
+        const target = new Date(ref);
+        target.setDate(target.getDate() + diff);
+        target.setHours(hour, 0, 0, 0);
+        // Solo incluir si target >= baseDate (no fechas pasadas por el ajuste)
+        if (w === 0 && target < baseDate) continue;
+        dates.push(new Date(target));
+      }
+    }
+
+    // Eliminar duplicados y ordenar
+    const unique = [...new Map(dates.map(dt => [dt.getTime(), dt])).values()]
+      .sort((a, b) => a - b);
+
+    // Guardar en batch (addDoc en secuencia, Firestore free tier no tiene batch write en SDK v9 modular fácilmente)
+    const groupId = `group_${Date.now()}`;
+    for (const dt of unique) {
+      await addDoc(collection(db, 'slots'), {
+        ...baseData,
+        date: Timestamp.fromDate(dt),
+        createdAt: Timestamp.now(),
+        repeatGroupId: groupId,
+        repeatTotal: unique.length,
+      });
+    }
+  }
+
   closeModalSlot();
 };
 
@@ -529,7 +616,6 @@ window.completeSlot = async function () {
   if (!editingSlot) return;
   if (!confirm('¿Marcar como completada? Se descontará una sesión del bono.')) return;
   await updateDoc(doc(db, 'slots', editingSlot.id), { status: 'completed', updatedAt: Timestamp.now() });
-  // Descuenta sesión del bono
   const client = clients.find(c => c.id === editingSlot.clientId);
   if (client && client.paymentType === 'bono' && (client.sessionsLeft || 0) > 0) {
     await updateDoc(doc(db, 'clients', client.id), { sessionsLeft: client.sessionsLeft - 1 });
@@ -574,8 +660,6 @@ function renderPagos() {
   `;
 
   const listEl = $('payments-list');
-
-  // Add payment button row
   let html = `<div style="margin-bottom:16px">
     <button class="btn btn-primary" onclick="openPaymentModal()">+ Registrar pago</button>
   </div>`;
@@ -656,7 +740,6 @@ window.savePayment = async function () {
   } else {
     data.createdAt = Timestamp.now();
     await addDoc(collection(db, 'payments'), data);
-    // Si es un bono, actualizar sesiones del cliente
     if (concept === 'bono') {
       const client = clients.find(c => c.id === clientId);
       if (client) {
@@ -710,7 +793,7 @@ function updateBadges(count) {
 //  HELPERS
 // ═══════════════════════════════════════════════════════════
 function $ (id)         { return document.getElementById(id); }
-function val (id)       { return $( id)?.value || ''; }
+function val (id)       { return $(id)?.value || ''; }
 function show (id)      { const el = $(id); if (el) el.classList.remove('hidden'); }
 function hide (id)      { const el = $(id); if (el) el.classList.add('hidden'); }
 function toggleClass(id, cls, force) { const el = $(id); if (el) el.classList.toggle(cls, force); }
@@ -723,3 +806,10 @@ function toDateInput(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).pa
 function payLabel(t)    { return { bono:'Bono', mensual:'Mensual', individual:'Individual' }[t] || t || 'Bono'; }
 function conceptLabel(t){ return { bono:'Renovación de bono', mensual:'Mensualidad', individual:'Sesión individual', otro:'Otro' }[t] || t || '—'; }
 function showError(id, msg) { const el=$(id); if(el){el.textContent=msg; el.classList.remove('hidden');} }
+
+function statusIcon(status) {
+  return { scheduled:'⏳', completed:'✅', pending:'🔶', cancelled:'❌' }[status] || '⏳';
+}
+function statusLabel(status) {
+  return { scheduled:'Programada', completed:'Completada', pending:'Pendiente confirmación', cancelled:'Cancelada' }[status] || 'Programada';
+}

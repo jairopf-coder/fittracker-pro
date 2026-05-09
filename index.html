@@ -147,6 +147,13 @@
       <div class="calendar-wrapper">
         <div id="calendar-grid" class="calendar-grid"></div>
       </div>
+      <!-- Legend -->
+      <div class="cal-legend">
+        <div class="cal-legend-item"><div class="cal-legend-dot ld-scheduled"></div> Programada</div>
+        <div class="cal-legend-item"><div class="cal-legend-dot ld-completed"></div> Completada</div>
+        <div class="cal-legend-item"><div class="cal-legend-dot ld-pending"></div> Pendiente confirmación</div>
+        <div class="cal-legend-item"><div class="cal-legend-dot ld-cancelled"></div> Cancelada</div>
+      </div>
     </div>
 
     <!-- ── PAGOS ── -->
@@ -256,6 +263,8 @@
     </div>
     <div class="modal-body">
       <input type="hidden" id="slot-id" />
+
+      <!-- Tipo -->
       <div class="form-group">
         <label>Tipo</label>
         <select id="s-type" onchange="toggleSlotFields()">
@@ -264,21 +273,27 @@
           <option value="free">Libre</option>
         </select>
       </div>
+
+      <!-- Cliente (solo si tipo=client) -->
       <div class="form-group" id="slot-client-group">
         <label>Cliente</label>
         <select id="s-client"></select>
       </div>
+
+      <!-- Título (tipo != client) -->
       <div class="form-group hidden" id="slot-title-group">
         <label>Título</label>
         <input id="s-title" placeholder="Ej: Reunión..." />
       </div>
+
+      <!-- Fecha / Hora / Duración -->
       <div class="form-row">
         <div class="form-group">
           <label>Fecha</label>
           <input type="date" id="s-date" />
         </div>
         <div class="form-group">
-          <label>Hora</label>
+          <label>Hora inicio</label>
           <select id="s-hour"></select>
         </div>
         <div class="form-group">
@@ -292,22 +307,62 @@
           </select>
         </div>
       </div>
+
+      <!-- Estado (solo al editar) -->
+      <div class="form-group" id="slot-status-group" style="display:none">
+        <label>Estado</label>
+        <select id="s-status" onchange="updateStatusPreview()">
+          <option value="scheduled">✅ Programada</option>
+          <option value="pending">⏳ Pendiente confirmación</option>
+          <option value="cancelled">❌ Cancelada</option>
+          <option value="completed">☑️ Completada</option>
+        </select>
+      </div>
+
+      <!-- Notas -->
       <div class="form-group">
         <label>Notas</label>
         <input id="s-notes" placeholder="Observaciones..." />
       </div>
-      <div class="form-group" id="slot-status-group" style="display:none">
-        <label>Estado</label>
-        <select id="s-status">
-          <option value="scheduled">Programada</option>
-          <option value="completed">Completada</option>
-          <option value="cancelled">Cancelada</option>
-        </select>
+
+      <!-- ── REPETICIÓN (solo nueva sesión) ── -->
+      <div id="repeat-section">
+        <div class="form-group" style="margin-bottom:8px">
+          <label class="checkbox-label">
+            <input type="checkbox" id="s-repeat" onchange="toggleRepeatBox()" />
+            Repetir esta sesión semanalmente
+          </label>
+        </div>
+        <div id="repeat-box" class="repeat-box hidden">
+          <div class="form-group">
+            <label>Días de la semana</label>
+            <div class="days-picker" id="days-picker">
+              <button type="button" class="day-btn" data-day="1">Lun</button>
+              <button type="button" class="day-btn" data-day="2">Mar</button>
+              <button type="button" class="day-btn" data-day="3">Mié</button>
+              <button type="button" class="day-btn" data-day="4">Jue</button>
+              <button type="button" class="day-btn" data-day="5">Vie</button>
+              <button type="button" class="day-btn" data-day="6">Sáb</button>
+              <button type="button" class="day-btn" data-day="0">Dom</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Número de semanas</label>
+            <select id="s-weeks">
+              <option value="4">4 semanas</option>
+              <option value="6">6 semanas</option>
+              <option value="8" selected>8 semanas</option>
+              <option value="12">12 semanas</option>
+            </select>
+          </div>
+        </div>
       </div>
-    </div>
+
+    </div><!-- /modal-body -->
+
     <div class="modal-footer">
       <button id="btn-delete-slot" class="btn btn-danger btn-sm hidden" onclick="deleteSlot()">🗑️ Eliminar</button>
-      <button id="btn-complete-slot" class="btn btn-success btn-sm hidden" onclick="completeSlot()">✅ Completar</button>
+      <button id="btn-complete-slot" class="btn btn-success btn-sm hidden" onclick="completeSlot()">☑️ Completar</button>
       <button class="btn btn-outline" onclick="closeModalSlot()">Cancelar</button>
       <button class="btn btn-primary" onclick="saveSlot()">Guardar</button>
     </div>
