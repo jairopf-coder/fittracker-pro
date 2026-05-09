@@ -554,10 +554,17 @@ function renderCalendario() {
                           : status === 'pending'   ? 'status-pending'
                           : status === 'cancelled' ? 'status-cancelled'
                           : '';
+          const dur = s.duration || 60;
+          const startTime = formatTime(toDate(s.date));
+          const endDate = new Date(toDate(s.date).getTime() + dur * 60000);
+          const endTime = formatTime(endDate);
           return `<div class="cal-event type-${s.type || 'client'} ${statusCls}"
             onclick="openSlotModal('${s.id}',event)"
-            title="${esc(label)} · ${statusLabel(status)}"
-            style="height:${Math.max(20, (s.duration || 60) / 60 * 52 - 4)}px">
+            data-tooltip-name="${esc(label)}"
+            data-tooltip-time="${startTime} – ${endTime}"
+            data-tooltip-dur="${dur} min"
+            data-tooltip-status="${esc(statusLabel(status))}"
+            style="height:${Math.max(20, dur / 60 * 52 - 4)}px">
             <span class="ev-label">${esc(label)}</span>
           </div>`;
         }).join('')}
@@ -566,6 +573,51 @@ function renderCalendario() {
   });
 
   grid.innerHTML = html;
+
+  // ── Week summary ──────────────────────────────────────────
+  const weekEnd = new Date(days[6]); weekEnd.setHours(23,59,59,999);
+  const weekStart2 = new Date(days[0]); weekStart2.setHours(0,0,0,0);
+  const weekSlots = slots.filter(s => {
+    const d = toDate(s.date);
+    return d >= weekStart2 && d <= weekEnd;
+  });
+  const countByStatus = { scheduled: 0, completed: 0, pending: 0, cancelled: 0 };
+  weekSlots.forEach(s => {
+    const st = s.status || 'scheduled';
+    if (st in countByStatus) countByStatus[st]++;
+  });
+  const total = weekSlots.length;
+  const summaryEl = document.getElementById('week-summary');
+  if (summaryEl) {
+    if (total === 0) {
+      summaryEl.innerHTML = `<span class="ws-empty">Sin sesiones esta semana</span>`;
+    } else {
+      summaryEl.innerHTML = `
+        <span class="ws-title">Resumen semanal</span>
+        <div class="ws-stats">
+          <div class="ws-stat ws-scheduled">
+            <span class="ws-count">${countByStatus.scheduled}</span>
+            <span class="ws-label">Programadas</span>
+          </div>
+          <div class="ws-stat ws-completed">
+            <span class="ws-count">${countByStatus.completed}</span>
+            <span class="ws-label">Completadas</span>
+          </div>
+          <div class="ws-stat ws-pending">
+            <span class="ws-count">${countByStatus.pending}</span>
+            <span class="ws-label">Pendientes</span>
+          </div>
+          <div class="ws-stat ws-cancelled">
+            <span class="ws-count">${countByStatus.cancelled}</span>
+            <span class="ws-label">Canceladas</span>
+          </div>
+          <div class="ws-stat ws-total">
+            <span class="ws-count">${total}</span>
+            <span class="ws-label">Total</span>
+          </div>
+        </div>`;
+    }
+  }
 }
 
 window.handleCellClick = function (dayIdx, hour, e) {
