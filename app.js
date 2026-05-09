@@ -106,14 +106,15 @@ function refreshAll() {
 // ═══════════════════════════════════════════════════════════
 window.navigate = function (page) {
   currentPage = page;
-  ['dashboard','clientes','calendario','pagos'].forEach(p => {
+  ['dashboard','clientes','calendario','pagos','client-detail'].forEach(p => {
     toggleClass(`page-${p}`, 'hidden', p !== page);
   });
+  const navPage = ['dashboard','clientes','calendario','pagos'].includes(page) ? page : null;
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
-    el.classList.toggle('active', el.dataset.page === page);
+    el.classList.toggle('active', navPage ? el.dataset.page === navPage : false);
   });
   document.querySelectorAll('.bottom-nav-item[data-page]').forEach(el => {
-    el.classList.toggle('active', el.dataset.page === page);
+    el.classList.toggle('active', navPage ? el.dataset.page === navPage : false);
   });
   closeSidebar();
 };
@@ -128,6 +129,130 @@ window.toggleSidebar = function () {
 window.closeSidebar = function () {
   $('sidebar').classList.remove('open');
   $('sidebar-overlay').classList.remove('visible');
+};
+
+// ═══════════════════════════════════════════════════════════
+//  UI HELPERS — avatar color, toast, detalle cliente
+// ═══════════════════════════════════════════════════════════
+function avatarColor(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return `hsl(${h},65%,55%)`;
+}
+
+function showToast(msg, type = 'success') {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.textContent = msg;
+  container.appendChild(t);
+  setTimeout(() => {
+    t.classList.add('hiding');
+    t.addEventListener('animationend', () => t.remove());
+  }, 2600);
+}
+
+window.openClientDetail = function (id) {
+  const c = clients.find(x => x.id === id);
+  if (!c) return;
+
+  const color = avatarColor(c.name);
+  const initials = c.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+
+  const clientSlots = slots
+    .filter(s => s.clientId === id)
+    .sort((a, b) => toDate(b.date) - toDate(a.date))
+    .slice(0, 6);
+
+  const clientPayments = payments
+    .filter(p => p.clientId === id)
+    .sort((a, b) => toDate(b.date) - toDate(a.date))
+    .slice(0, 5);
+
+  const totalPaid = payments.filter(p => p.clientId === id).reduce((s, p) => s + (p.amount || 0), 0);
+
+  const statusTag = c.active
+    ? `<span class="tag tag-active">Activo</span>`
+    : `<span class="tag tag-inactive">Inactivo</span>`;
+  const payTag = `<span class="tag tag-${c.paymentType || 'bono'}">${payLabel(c.paymentType)}</span>`;
+
+  let bonoHtml = '';
+  if (c.paymentType === 'bono') {
+    const pct   = Math.min(100, ((c.sessionsLeft || 0) / (c.bonoSize || 10)) * 100);
+    const color2 = (c.sessionsLeft || 0) <= 2 ? 'var(--red)' : (c.sessionsLeft || 0) <= 4 ? 'var(--orange)' : 'var(--green)';
+    bonoHtml = `<div class="detail-bono">
+      <h3>Bono de sesiones</h3>
+      <div class="detail-bono-bar-wrap">
+        <div class="detail-bono-bar" style="width:${pct}%;background:${color2}"></div>
+      </div>
+      <div class="detail-bono-label">${c.sessionsLeft || 0} de ${c.bonoSize || 10} sesiones restantes</div>
+    </div>`;
+  }
+
+  const sessionsHtml = clientSlots.length === 0
+    ? `<div class="detail-empty">Sin sesiones registradas</div>`
+    : clientSlots.map(s => {
+        const d = toDate(s.date);
+        return `<div class="detail-session-item">
+          <span>${statusIcon(s.status)}</span>
+          <span style="flex:1">${d.toLocaleDateString('es-ES',{day:'numeric',month:'short'})}</span>
+          <span style="color:var(--text2);font-size:11px">${formatTime(d)}</span>
+        </div>`;
+      }).join('');
+
+  const paymentsHtml = clientPayments.length === 0
+    ? `<div class="detail-empty">Sin pagos registrados</div>`
+    : clientPayments.map(p => {
+        const d = toDate(p.date);
+        return `<div class="detail-payment-item">
+          <div>
+            <div style="font-weight:700">${conceptLabel(p.concept)}</div>
+            <div style="font-size:11px;color:var(--text2)">${d.toLocaleDateString('es-ES',{day:'numeric',month:'short',year:'numeric'})}</div>
+          </div>
+          <div class="detail-payment-amount">+${(p.amount||0).toFixed(0)}€</div>
+        </div>`;
+      }).join('');
+
+  const page = $('page-client-detail');
+  page.innerHTML = `
+    <div class="page-header">
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="btn btn-outline btn-sm" onclick="navigate('clientes')">← Volver</button>
+        <h1>${esc(c.name)}</h1>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openClientModal('${c.id}')">✏️ Editar</button>
+    </div>
+
+    <div class="detail-hero">
+      <div class="detail-avatar" style="background:${color}">${initials}</div>
+      <div class="detail-info">
+        <h2>${esc(c.name)}</h2>
+        <p>${esc(c.phone || c.email || '—')}${c.notes ? ' · ' + esc(c.notes) : ''}</p>
+        <div class="detail-tags">${statusTag}${payTag}
+          <span class="tag" style="background:rgba(255,255,255,.06);color:var(--text2)">Total pagado: ${totalPaid.toFixed(0)}€</span>
+        </div>
+      </div>
+    </div>
+
+    ${bonoHtml}
+
+    <div class="detail-grid">
+      <div class="detail-section">
+        <h3>Últimas sesiones</h3>
+        ${sessionsHtml}
+      </div>
+      <div class="detail-section">
+        <h3>Últimos pagos</h3>
+        ${paymentsHtml}
+      </div>
+    </div>
+  `;
+  navigate('client-detail');
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -177,11 +302,27 @@ function renderDashboard() {
     return isThisWeek(d) && s.status !== 'cancelled';
   });
 
+  // Trend: sesiones esta semana vs semana anterior
+  const prevWeekStart = getWeekStart(new Date()); prevWeekStart.setDate(prevWeekStart.getDate() - 7);
+  const prevWeekEnd   = new Date(prevWeekStart); prevWeekEnd.setDate(prevWeekEnd.getDate() + 6);
+  const prevWeekSlots = slots.filter(s => { const d = toDate(s.date); return d >= prevWeekStart && d <= prevWeekEnd && s.status !== 'cancelled'; });
+  const prevMonthRevenue = payments.filter(p => { const d = toDate(p.date); const n = new Date(); return d.getMonth() === (n.getMonth() === 0 ? 11 : n.getMonth()-1); }).reduce((s,p) => s+(p.amount||0), 0);
+
+  function trendHtml(curr, prev, unit='') {
+    if (prev === 0 && curr === 0) return `<span class="stat-trend flat">— sin datos</span>`;
+    if (prev === 0) return `<span class="stat-trend up">▲ nuevo</span>`;
+    const diff = curr - prev;
+    const pct  = Math.round(Math.abs(diff / prev) * 100);
+    if (diff > 0) return `<span class="stat-trend up">▲ +${pct}% vs anterior</span>`;
+    if (diff < 0) return `<span class="stat-trend down">▼ −${pct}% vs anterior</span>`;
+    return `<span class="stat-trend flat">= igual que antes</span>`;
+  }
+
   $('dash-stats').innerHTML = `
     <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-value">${activeClients.length}</div><div class="stat-label">Clientes activos</div></div>
     <div class="stat-card"><div class="stat-icon">📅</div><div class="stat-value">${todaySlots.length}</div><div class="stat-label">Sesiones hoy</div></div>
-    <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-value">${weekSlots.length}</div><div class="stat-label">Esta semana</div></div>
-    <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-value">${totalRevenue.toFixed(0)}€</div><div class="stat-label">Total facturado</div></div>
+    <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-value">${weekSlots.length}</div><div class="stat-label">Esta semana</div>${trendHtml(weekSlots.length, prevWeekSlots.length)}</div>
+    <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-value">${totalRevenue.toFixed(0)}€</div><div class="stat-label">Total facturado</div>${trendHtml(totalRevenue, prevMonthRevenue)}</div>
   `;
 
   // Today sessions (incluye pendientes y canceladas para visibilidad)
@@ -217,12 +358,12 @@ function renderDashboard() {
     bonosEl.innerHTML = bonoClients.map(c => {
       const pct  = Math.min(100, ((c.sessionsLeft || 0) / (c.bonoSize || 10)) * 100);
       const color = (c.sessionsLeft || 0) <= 2 ? 'var(--red)' : (c.sessionsLeft || 0) <= 4 ? 'var(--orange)' : 'var(--green)';
-      return `<div class="bono-card" onclick="openClientModal('${c.id}')">
-        <div class="bono-avatar">${c.name.charAt(0).toUpperCase()}</div>
+      return `<div class="bono-card" onclick="openClientDetail('${c.id}')">
+        <div class="bono-avatar" style="background:${avatarColor(c.name)}">${c.name.charAt(0).toUpperCase()}</div>
         <div class="bono-info">
           <strong>${esc(c.name)}</strong>
           <div class="bono-bar-wrap"><div class="bono-bar" style="width:${pct}%;background:${color}"></div></div>
-          <span class="bono-count">${c.sessionsLeft || 0} sesiones</span>
+          <span class="bono-count">${c.sessionsLeft || 0} / ${c.bonoSize || 10} sesiones</span>
         </div>
       </div>`;
     }).join('');
@@ -253,7 +394,7 @@ window.renderClientes = function () {
 
   const el = $('clients-grid');
   if (list.length === 0) {
-    el.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><span>👥</span><p>No hay clientes</p></div>`;
+    el.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><span>👥</span><p>No hay clientes todavía</p><button class="btn btn-primary btn-sm" onclick="openClientModal()">+ Añadir primer cliente</button></div>`;
     return;
   }
   el.innerHTML = list.map(c => {
@@ -266,8 +407,10 @@ window.renderClientes = function () {
       const level = (c.sessionsLeft || 0) <= 2 ? 'danger' : (c.sessionsLeft || 0) <= 4 ? 'warning' : 'ok';
       bonoTag = `<span class="tag tag-${level}">${c.sessionsLeft || 0} ses.</span>`;
     }
-    return `<div class="client-card" onclick="openClientModal('${c.id}')">
-      <div class="client-avatar">${c.name.charAt(0).toUpperCase()}</div>
+    const color = avatarColor(c.name);
+    const initials = c.name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
+    return `<div class="client-card" onclick="openClientDetail('${c.id}')">
+      <div class="client-avatar" style="background:${color}">${initials}</div>
       <div class="client-info">
         <h3>${esc(c.name)}</h3>
         <p>${esc(c.phone || c.email || '—')}</p>
@@ -323,6 +466,7 @@ window.saveClient = async function () {
     await addDoc(collection(db, 'clients'), data);
   }
   closeModalClient();
+  showToast(editingClient ? '✅ Cliente actualizado' : '✅ Cliente creado');
 };
 
 window.deleteClient = async function () {
@@ -330,6 +474,7 @@ window.deleteClient = async function () {
   if (!confirm(`¿Eliminar a ${editingClient.name}? Se borrarán todos sus datos.`)) return;
   await deleteDoc(doc(db, 'clients', editingClient.id));
   closeModalClient();
+  showToast('🗑️ Cliente eliminado', 'info');
 };
 
 window.closeModalClient = function (e) {
@@ -542,6 +687,7 @@ window.saveSlot = async function () {
     baseData.date = Timestamp.fromDate(new Date(y, m-1, d, hour, 0, 0));
     await updateDoc(doc(db, 'slots', editingSlot.id), baseData);
     closeModalSlot();
+    showToast('✅ Sesión actualizada');
     return;
   }
 
@@ -603,6 +749,7 @@ window.saveSlot = async function () {
   }
 
   closeModalSlot();
+  showToast('✅ Sesión guardada');
 };
 
 window.deleteSlot = async function () {
@@ -610,6 +757,7 @@ window.deleteSlot = async function () {
   if (!confirm('¿Eliminar esta sesión?')) return;
   await deleteDoc(doc(db, 'slots', editingSlot.id));
   closeModalSlot();
+  showToast('🗑️ Sesión eliminada', 'info');
 };
 
 window.completeSlot = async function () {
@@ -621,6 +769,7 @@ window.completeSlot = async function () {
     await updateDoc(doc(db, 'clients', client.id), { sessionsLeft: client.sessionsLeft - 1 });
   }
   closeModalSlot();
+  showToast('☑️ Sesión completada');
 };
 
 window.closeModalSlot = function (e) {
@@ -759,6 +908,7 @@ window.savePayment = async function () {
     }
   }
   closeModalPayment();
+  showToast('✅ Pago registrado');
 };
 
 window.deletePayment = async function () {
@@ -766,6 +916,7 @@ window.deletePayment = async function () {
   if (!confirm('¿Eliminar este pago?')) return;
   await deleteDoc(doc(db, 'payments', editingPayment.id));
   closeModalPayment();
+  showToast('🗑️ Pago eliminado', 'info');
 };
 
 window.closeModalPayment = function (e) {
