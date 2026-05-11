@@ -29,6 +29,43 @@ let editingPayment = null;
 
 const unsubs = {};
 
+// ─── Data-loaded flags (para skeleton loaders) ───────────
+const dataLoaded = { clients: false, slots: false, payments: false };
+
+// ─── Theme ───────────────────────────────────────────────
+(function initTheme() {
+  const saved = localStorage.getItem('fittracker-theme');
+  if (saved === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#f0f2f7');
+  }
+})();
+
+window.toggleTheme = function () {
+  const root = document.documentElement;
+  const isLight = root.getAttribute('data-theme') === 'light';
+  if (isLight) {
+    root.removeAttribute('data-theme');
+    localStorage.setItem('fittracker-theme', 'dark');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#0d0f14');
+  } else {
+    root.setAttribute('data-theme', 'light');
+    localStorage.setItem('fittracker-theme', 'light');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#f0f2f7');
+  }
+  _updateThemeUI();
+};
+
+function _updateThemeUI() {
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  const icon  = document.getElementById('theme-icon');
+  const label = document.getElementById('theme-label');
+  if (icon)  icon.textContent  = isLight ? '🌙' : '☀️';
+  if (label) label.textContent = isLight ? 'Modo oscuro' : 'Modo claro';
+}
+// Run once on load to sync icon
+document.addEventListener('DOMContentLoaded', _updateThemeUI);
+
 // ═══════════════════════════════════════════════════════════
 //  AUTH
 // ═══════════════════════════════════════════════════════════
@@ -66,10 +103,14 @@ document.getElementById('login-password').addEventListener('keydown', e => {
 //  FIRESTORE LISTENERS
 // ═══════════════════════════════════════════════════════════
 function startListeners() {
+  // Mostrar skeletons antes del primer snapshot
+  showSkeletons();
+
   unsubs.clients = onSnapshot(
     query(collection(db, 'clients'), orderBy('name')),
     snap => {
       clients = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      dataLoaded.clients = true;
       refreshAll();
     }
   );
@@ -77,6 +118,7 @@ function startListeners() {
     query(collection(db, 'slots'), orderBy('date')),
     snap => {
       slots = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      dataLoaded.slots = true;
       refreshAll();
     }
   );
@@ -84,6 +126,7 @@ function startListeners() {
     query(collection(db, 'payments'), orderBy('date', 'desc')),
     snap => {
       payments = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      dataLoaded.payments = true;
       refreshAll();
     }
   );
@@ -91,6 +134,28 @@ function startListeners() {
 
 function stopListeners() {
   Object.values(unsubs).forEach(u => u && u());
+  dataLoaded.clients = false;
+  dataLoaded.slots   = false;
+  dataLoaded.payments = false;
+}
+
+// ─── Skeleton loaders ────────────────────────────────────
+function skeletonGrid(cls, count) {
+  return Array(count).fill(`<div class="skeleton ${cls}"></div>`).join('');
+}
+
+function showSkeletons() {
+  // Dashboard
+  $('dash-stats').innerHTML   = skeletonGrid('skeleton-stat', 4);
+  $('dash-today').innerHTML   = skeletonGrid('skeleton-session', 3);
+  $('dash-bonos').innerHTML   = skeletonGrid('skeleton-bono', 4);
+  // Clientes
+  $('clients-grid').innerHTML = skeletonGrid('skeleton-client', 6);
+  // Calendario
+  $('calendar-grid').innerHTML = skeletonGrid('skeleton-cal-row', 5);
+  // Pagos
+  $('payments-list').innerHTML = skeletonGrid('skeleton-payment', 5);
+  if ($('payments-summary')) $('payments-summary').innerHTML = skeletonGrid('skeleton-stat', 3);
 }
 
 function refreshAll() {
@@ -105,10 +170,11 @@ function refreshAll() {
 //  NAVIGATION
 // ═══════════════════════════════════════════════════════════
 window.navigate = function (page) {
+  const pages = ['dashboard','clientes','calendario','pagos','client-detail'];
+  const prevPage = currentPage;
+  const prevEl   = document.getElementById(`page-${prevPage}`);
+
   currentPage = page;
-  ['dashboard','clientes','calendario','pagos','client-detail'].forEach(p => {
-    toggleClass(`page-${p}`, 'hidden', p !== page);
-  });
   const navPage = ['dashboard','clientes','calendario','pagos'].includes(page) ? page : null;
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
     el.classList.toggle('active', navPage ? el.dataset.page === navPage : false);
@@ -117,6 +183,28 @@ window.navigate = function (page) {
     el.classList.toggle('active', navPage ? el.dataset.page === navPage : false);
   });
   closeSidebar();
+
+  const doSwitch = () => {
+    pages.forEach(p => {
+      const el = document.getElementById(`page-${p}`);
+      if (!el) return;
+      if (p === page) {
+        el.classList.remove('hidden', 'page-fade-out');
+        el.classList.add('page-fade-in');
+        el.addEventListener('animationend', () => el.classList.remove('page-fade-in'), { once: true });
+      } else {
+        el.classList.add('hidden');
+        el.classList.remove('page-fade-out', 'page-fade-in');
+      }
+    });
+  };
+
+  if (prevEl && !prevEl.classList.contains('hidden') && prevPage !== page) {
+    prevEl.classList.add('page-fade-out');
+    setTimeout(doSwitch, 75);
+  } else {
+    doSwitch();
+  }
 };
 
 window.toggleSidebar = function () {
@@ -260,9 +348,9 @@ window.openClientDetail = function (id) {
 // ═══════════════════════════════════════════════════════════
 function renderDashboard() {
   if (currentPage !== 'dashboard') return;
+  if (!dataLoaded.clients || !dataLoaded.slots || !dataLoaded.payments) return;
 
   $('dash-date').textContent = new Date().toLocaleDateString('es-ES', { weekday:'long', day:'numeric', month:'long' });
-
   const activeClients = clients.filter(c => c.active);
   const totalRevenue  = payments.reduce((s, p) => s + (p.amount || 0), 0);
 
@@ -382,6 +470,7 @@ window.setClientFilter = function (f) {
 };
 
 window.renderClientes = function () {
+  if (!dataLoaded.clients) return;
   const search = (val('client-search') || '').toLowerCase();
   let list = clients.filter(c => {
     const match = c.name.toLowerCase().includes(search) ||
@@ -509,6 +598,7 @@ function getWeekStart(d) {
 }
 
 function renderCalendario() {
+  if (!dataLoaded.clients || !dataLoaded.slots) return;
   const weekStart = getWeekStart(currentWeek);
   const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart);
@@ -908,6 +998,7 @@ window.exportPaymentsCSV = function () {
 };
 
 function renderPagos() {
+  if (!dataLoaded.clients || !dataLoaded.payments) return;
   const y = currentMonth.getFullYear();
   const m = currentMonth.getMonth();
   $('month-label').textContent = currentMonth.toLocaleDateString('es-ES', { month:'long', year:'numeric' });
