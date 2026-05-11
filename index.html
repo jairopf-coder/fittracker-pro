@@ -83,6 +83,11 @@
       </button>
     </nav>
     <div class="sidebar-footer">
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Cambiar modo de color" title="Modo claro / oscuro">
+        <span class="nav-icon" id="theme-icon">☀️</span>
+        <span class="nav-label" id="theme-label">Modo claro</span>
+        <span class="theme-toggle-track"><span class="theme-toggle-thumb"></span></span>
+      </button>
       <button class="nav-item logout-btn" onclick="doLogout()">
         <span class="nav-icon">🚪</span><span class="nav-label">Salir</span>
       </button>
@@ -299,7 +304,11 @@
         </div>
         <div class="form-group">
           <label>Hora inicio</label>
-          <select id="s-hour"></select>
+          <div class="time-row">
+            <select id="s-hour"></select>
+            <span style="color:var(--text2);font-weight:700">:</span>
+            <select id="s-min"></select>
+          </div>
         </div>
         <div class="form-group">
           <label>Duración</label>
@@ -352,13 +361,18 @@
             </div>
           </div>
           <div class="form-group">
-            <label>Número de semanas</label>
-            <select id="s-weeks">
-              <option value="4">4 semanas</option>
-              <option value="6">6 semanas</option>
-              <option value="8" selected>8 semanas</option>
-              <option value="12">12 semanas</option>
+            <label>Total de sesiones</label>
+            <select id="s-weeks" onchange="updateRepeatPreview()">
+              <option value="4">4 sesiones</option>
+              <option value="6">6 sesiones</option>
+              <option value="8">8 sesiones</option>
+              <option value="10">10 sesiones</option>
+              <option value="12" selected>12 sesiones</option>
+              <option value="16">16 sesiones</option>
+              <option value="20">20 sesiones</option>
+              <option value="24">24 sesiones</option>
             </select>
+            <small id="repeat-preview" style="color:var(--text2);font-size:11px;margin-top:4px;display:block"></small>
           </div>
         </div>
       </div>

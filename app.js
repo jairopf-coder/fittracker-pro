@@ -597,9 +597,253 @@ function getWeekStart(d) {
   return date;
 }
 
+
+// ── px per minute constant (52px per hour) ───────────────
+const PX_PER_MIN = 52 / 60;
+const CAL_START_H = 7; // first visible hour
+
+function minutesToPx(minutes) { return minutes * PX_PER_MIN; }
+function timeToTopPx(h, m) { return minutesToPx((h - CAL_START_H) * 60 + m); }
+
+// ── Drag state ────────────────────────────────────────────
+let dragSlotId   = null;
+let dragOffsetMin = 0; // minutes from event top where user grabbed
+
 function renderCalendario() {
   if (!dataLoaded.clients || !dataLoaded.slots) return;
+
   const weekStart = getWeekStart(currentWeek);
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + i);
+    return d;
+  });
+
+  const opts = { day:'numeric', month:'short' };
+  $('week-label').textContent =
+    `${days[0].toLocaleDateString('es-ES', opts)} – ${days[6].toLocaleDateString('es-ES', { ...opts, year:'numeric' })}`;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const DAYS_ES = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+  const calendarEl = $('calendar-grid');
+  const totalHours = HOURS.length; // 14 hours (7-20)
+  const colHeight  = totalHours * 52; // px
+
+  // ── Build HTML ────────────────────────────────────────
+  // Header row
+  let html = `<div class="cal-header-row">
+    <div class="cal-corner"></div>`;
+  days.forEach((d, i) => {
+    const isT = d.getTime() === today.getTime();
+    html += `<div class="cal-day-header ${isT ? 'today' : ''}">
+      <span class="day-name">${DAYS_ES[i]}</span>
+      <span class="day-number">${d.getDate()}</span>
+    </div>`;
+  });
+  html += `</div>`;
+
+  // Body
+  html += `<div class="cal-body">`;
+
+  // Time gutter
+  html += `<div class="cal-time-col">`;
+  HOURS.forEach(h => {
+    html += `<div class="cal-time">${h}:00</div>`;
+  });
+  html += `</div>`;
+
+  // Day columns
+  days.forEach((day, dayIdx) => {
+    const isT = day.getTime() === today.getTime();
+    const dateKey = `${day.getFullYear()}-${day.getMonth()}-${day.getDate()}`;
+
+    // Events for this day
+    const daySlots = slots.filter(s => {
+      const sd = toDate(s.date);
+      return sd.getFullYear() === day.getFullYear()
+          && sd.getMonth()    === day.getMonth()
+          && sd.getDate()     === day.getDate();
+    });
+
+    // Build hour grid lines (non-interactive, just visual)
+    let gridLines = '';
+    HOURS.forEach(() => { gridLines += `<div class="cal-hour-slot half-mark"></div>`; });
+
+    // Build event chips
+    let evHtml = '';
+    daySlots.forEach(s => {
+      const sd = toDate(s.date);
+      const h  = sd.getHours();
+      const m  = sd.getMinutes();
+      const dur = s.duration || 60;
+      const top  = timeToTopPx(h, m);
+      const height = Math.max(22, minutesToPx(dur) - 3);
+
+      if (top < 0 || top > colHeight) return; // outside visible range
+
+      const client = clients.find(c => c.id === s.clientId);
+      const label  = client ? client.name : (s.title || 'Bloqueado');
+      const status = s.status || 'scheduled';
+      const statusCls = status === 'completed' ? 'status-completed'
+                      : status === 'pending'   ? 'status-pending'
+                      : status === 'cancelled' ? 'status-cancelled' : '';
+      const startTime = formatTime(sd);
+      const endDate   = new Date(sd.getTime() + dur * 60000);
+      const endTime   = formatTime(endDate);
+      const showTime  = height >= 36;
+
+      evHtml += `<div class="cal-event type-${s.type || 'client'} ${statusCls}"
+        style="top:${top}px;height:${height}px"
+        data-slot-id="${s.id}"
+        draggable="true"
+        onclick="openSlotModal('${s.id}',event)"
+        data-tooltip-name="${esc(label)}"
+        data-tooltip-time="${startTime} – ${endTime}"
+        data-tooltip-dur="${dur} min"
+        data-tooltip-status="${esc(statusLabel(status))}">
+        <span class="ev-label">${esc(label)}</span>
+        ${showTime ? `<span class="ev-time">${startTime} – ${endTime}</span>` : ''}
+      </div>`;
+    });
+
+    // Now line (only on today's column)
+    let nowLine = '';
+    if (isT) {
+      const now = new Date();
+      const nowTop = timeToTopPx(now.getHours(), now.getMinutes());
+      if (nowTop >= 0 && nowTop <= colHeight) {
+        nowLine = `<div class="cal-now-line" style="top:${nowTop}px"></div>`;
+      }
+    }
+
+    html += `<div class="cal-day-col ${isT ? 'today-col' : ''}"
+      data-day-idx="${dayIdx}"
+      data-date="${dateKey}"
+      onclick="handleColClick(event,${dayIdx})"
+      ondragover="handleDragOver(event)"
+      ondragleave="handleDragLeave(event)"
+      ondrop="handleDrop(event,${dayIdx})">
+      ${gridLines}
+      ${nowLine}
+      ${evHtml}
+    </div>`;
+  });
+
+  html += `</div>`; // .cal-body
+
+  calendarEl.innerHTML = html;
+
+  // Attach drag listeners imperatively (draggable=true alone needs ondragstart)
+  calendarEl.querySelectorAll('.cal-event[data-slot-id]').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      dragSlotId = el.dataset.slotId;
+      const s  = slots.find(x => x.id === dragSlotId);
+      if (!s) return;
+      const sd = toDate(s.date);
+      const eventTopPx = parseFloat(el.style.top);
+      const colRect    = el.closest('.cal-day-col').getBoundingClientRect();
+      const grabOffsetPx = e.clientY - colRect.top - eventTopPx;
+      dragOffsetMin = Math.round(grabOffsetPx / PX_PER_MIN);
+      el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', dragSlotId);
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+      calendarEl.querySelectorAll('.cal-day-col.drag-over').forEach(c => c.classList.remove('drag-over'));
+    });
+  });
+
+  // ── Week summary ─────────────────────────────────────
+  const weekEnd   = new Date(days[6]); weekEnd.setHours(23,59,59,999);
+  const weekBeg   = new Date(days[0]); weekBeg.setHours(0,0,0,0);
+  const weekSlots = slots.filter(s => { const d = toDate(s.date); return d >= weekBeg && d <= weekEnd; });
+  const countByStatus = { scheduled:0, completed:0, pending:0, cancelled:0 };
+  weekSlots.forEach(s => { const st = s.status || 'scheduled'; if (st in countByStatus) countByStatus[st]++; });
+  const total = weekSlots.length;
+  const summaryEl = document.getElementById('week-summary');
+  if (summaryEl) {
+    summaryEl.innerHTML = total === 0
+      ? `<span class="ws-empty">Sin sesiones esta semana</span>`
+      : `<span class="ws-title">Resumen semanal</span>
+        <div class="ws-stats">
+          <div class="ws-stat ws-scheduled"><span class="ws-count">${countByStatus.scheduled}</span><span class="ws-label">Programadas</span></div>
+          <div class="ws-stat ws-completed"><span class="ws-count">${countByStatus.completed}</span><span class="ws-label">Completadas</span></div>
+          <div class="ws-stat ws-pending"><span class="ws-count">${countByStatus.pending}</span><span class="ws-label">Pendientes</span></div>
+          <div class="ws-stat ws-cancelled"><span class="ws-count">${countByStatus.cancelled}</span><span class="ws-label">Canceladas</span></div>
+          <div class="ws-stat ws-total"><span class="ws-count">${total}</span><span class="ws-label">Total</span></div>
+        </div>`;
+  }
+
+  // Tick now-line every minute
+  clearInterval(window._nowLineTick);
+  window._nowLineTick = setInterval(() => {
+    const nowLine = calendarEl.querySelector('.cal-now-line');
+    if (!nowLine) { clearInterval(window._nowLineTick); return; }
+    const now = new Date();
+    nowLine.style.top = timeToTopPx(now.getHours(), now.getMinutes()) + 'px';
+  }, 60000);
+}
+
+// ── Drag-and-drop handlers ────────────────────────────────
+window.handleColClick = function (e, dayIdx) {
+  // Only fire on bare column click, not on child events
+  if (e.target.closest('.cal-event')) return;
+  const col     = e.currentTarget;
+  const rect    = col.getBoundingClientRect();
+  const offsetPx = e.clientY - rect.top;
+  const totalMin = offsetPx / PX_PER_MIN;
+  const absMin   = CAL_START_H * 60 + totalMin;
+  const h = Math.floor(absMin / 60);
+  const m = Math.round((absMin % 60) / 15) * 15; // snap to 15 min
+  const weekStart = getWeekStart(currentWeek);
+  const day = new Date(weekStart);
+  day.setDate(day.getDate() + dayIdx);
+  const dateStr = `${day.getFullYear()}-${String(day.getMonth()+1).padStart(2,'0')}-${String(day.getDate()).padStart(2,'0')}`;
+  openSlotModal(null, null, dateStr, h, m);
+};
+
+window.handleDragOver = function (e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drag-over');
+};
+
+window.handleDragLeave = function (e) {
+  e.currentTarget.classList.remove('drag-over');
+};
+
+window.handleDrop = async function (e, dayIdx) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (!dragSlotId) return;
+
+  const s = slots.find(x => x.id === dragSlotId);
+  if (!s) return;
+
+  const col      = e.currentTarget;
+  const rect     = col.getBoundingClientRect();
+  const offsetPx = e.clientY - rect.top;
+  // Subtract the grab offset so the event stays under the cursor where you grabbed it
+  const rawMin   = offsetPx / PX_PER_MIN - dragOffsetMin;
+  const absMin   = CAL_START_H * 60 + rawMin;
+  // Snap to 15 min grid
+  const snappedMin = Math.round(absMin / 15) * 15;
+  const newH = Math.max(CAL_START_H, Math.min(20, Math.floor(snappedMin / 60)));
+  const newM = snappedMin % 60;
+
+  const weekStart = getWeekStart(currentWeek);
+  const day = new Date(weekStart);
+  day.setDate(day.getDate() + dayIdx);
+  const newDate = new Date(day.getFullYear(), day.getMonth(), day.getDate(), newH, newM, 0);
+
+  await updateDoc(doc(db, 'slots', s.id), {
+    date: Timestamp.fromDate(newDate),
+    updatedAt: Timestamp.now(),
+  });
+  dragSlotId = null;
+  showToast('📅 Sesión movida');
+};
   const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart);
     d.setDate(d.getDate() + i);
@@ -710,17 +954,8 @@ function renderCalendario() {
   }
 }
 
-window.handleCellClick = function (dayIdx, hour, e) {
-  if (e.target !== e.currentTarget) return;
-  const weekStart = getWeekStart(currentWeek);
-  const day = new Date(weekStart);
-  day.setDate(day.getDate() + dayIdx);
-  const dateStr = `${day.getFullYear()}-${String(day.getMonth()+1).padStart(2,'0')}-${String(day.getDate()).padStart(2,'0')}`;
-  openSlotModal(null, null, dateStr, hour);
-};
-
 // ── Slot Modal ────────────────────────────────────────────
-window.openSlotModal = function (id, e, prefillDate, prefillHour) {
+window.openSlotModal = function (id, e, prefillDate, prefillHour, prefillMin) {
   if (e) e.stopPropagation();
   editingSlot = id ? slots.find(s => s.id === id) : null;
 
@@ -736,10 +971,16 @@ window.openSlotModal = function (id, e, prefillDate, prefillHour) {
       </option>`
     ).join('');
 
-  // Populate hour select
+  // Populate hour + minute selects
   const hourSel = $('s-hour');
+  const minSel  = $('s-min');
+  const editH = editingSlot ? toDate(editingSlot.date).getHours()   : (prefillHour ?? 9);
+  const editM = editingSlot ? toDate(editingSlot.date).getMinutes() : (prefillMin  ?? 0);
   hourSel.innerHTML = HOURS.map(h =>
-    `<option value="${h}" ${(editingSlot ? toDate(editingSlot.date).getHours() : prefillHour) === h ? 'selected' : ''}>${String(h).padStart(2,'0')}:00</option>`
+    `<option value="${h}" ${editH === h ? 'selected' : ''}>${String(h).padStart(2,'0')}</option>`
+  ).join('');
+  minSel.innerHTML = [0,15,30,45].map(m =>
+    `<option value="${m}" ${editM === m || (editM > 0 && editM < 15 && m === 0) ? 'selected' : ''}>${String(m).padStart(2,'0')}</option>`
   ).join('');
 
   if (editingSlot) {
@@ -798,21 +1039,45 @@ window.toggleDayBtn = function (btn) {
   btn.classList.toggle('selected');
 };
 
-// Bind day buttons
+// Bind day buttons + preview update
 document.getElementById('days-picker').addEventListener('click', e => {
   const btn = e.target.closest('.day-btn');
-  if (btn) btn.classList.toggle('selected');
+  if (btn) { btn.classList.toggle('selected'); updateRepeatPreview(); }
 });
+
+window.updateRepeatPreview = function () {
+  const preview = document.getElementById('repeat-preview');
+  if (!preview) return;
+  const total = parseInt($('s-weeks')?.value || 12);
+  const nDays = document.querySelectorAll('.day-btn.selected').length;
+  if (nDays === 0) { preview.textContent = ''; return; }
+  const perDay   = Math.floor(total / nDays);
+  const rem      = total % nDays;
+  const weekSpan = Math.ceil(total / nDays);
+  const NAMES = { 0:'Dom',1:'Lun',2:'Mar',3:'Mié',4:'Jue',5:'Vie',6:'Sáb' };
+  const dayNames = Array.from(document.querySelectorAll('.day-btn.selected'))
+    .map(b => NAMES[b.dataset.day]).join(' + ');
+  if (nDays === 1) {
+    preview.textContent = `→ ${total} ${dayNames} · ~${weekSpan} semanas`;
+  } else {
+    if (rem === 0) {
+      preview.textContent = `→ ${perDay} × ${dayNames} = ${total} sesiones · ~${weekSpan} semanas`;
+    } else {
+      preview.textContent = `→ ${total} sesiones entre ${dayNames} · ~${weekSpan} semanas`;
+    }
+  }
+};
 
 // ── Save Slot ─────────────────────────────────────────────
 window.saveSlot = async function () {
-  const type   = $('s-type').value;
+  const type    = $('s-type').value;
   const dateStr = $('s-date').value;
-  const hour   = parseInt($('s-hour').value);
+  const hour    = parseInt($('s-hour').value);
+  const min     = parseInt($('s-min')?.value || 0);
   if (!dateStr) { alert('Selecciona una fecha'); return; }
 
   const [y, m, d] = dateStr.split('-').map(Number);
-  const baseDate  = new Date(y, m-1, d, hour, 0, 0);
+  const baseDate  = new Date(y, m-1, d, hour, min, 0);
 
   const baseData = {
     type,
@@ -825,8 +1090,7 @@ window.saveSlot = async function () {
   };
 
   if (editingSlot) {
-    // Solo actualiza esta sesión
-    baseData.date = Timestamp.fromDate(new Date(y, m-1, d, hour, 0, 0));
+    baseData.date = Timestamp.fromDate(new Date(y, m-1, d, hour, min, 0));
     await updateDoc(doc(db, 'slots', editingSlot.id), baseData);
     closeModalSlot();
     showToast('✅ Sesión actualizada');
@@ -837,57 +1101,61 @@ window.saveSlot = async function () {
   const isRepeat = $('s-repeat').checked;
 
   if (!isRepeat) {
-    // Sesión única
     await addDoc(collection(db, 'slots'), {
       ...baseData,
       date: Timestamp.fromDate(baseDate),
       createdAt: Timestamp.now(),
     });
   } else {
-    // Sesión repetida
-    const weeks = parseInt($('s-weeks').value) || 8;
+    // ── Repetición: N ocurrencias totales entre los días seleccionados ──
+    // Ejemplo: 12 ocurrencias con Mar+Jue → 6 martes + 6 jueves = 12 sesiones
+    const totalOccurrences = parseInt($('s-weeks').value) || 12;
     const selectedDays = Array.from(document.querySelectorAll('.day-btn.selected'))
-      .map(b => parseInt(b.dataset.day));
+      .map(b => parseInt(b.dataset.day)); // JS: 0=Dom,1=Lun,...,6=Sáb
 
     if (selectedDays.length === 0) {
       alert('Selecciona al menos un día de la semana para repetir.');
       return;
     }
 
-    // Generar todas las fechas: para cada semana, para cada día seleccionado
+    // Ordenar días lunes→domingo para recorrerlos en orden dentro de cada semana
+    const sortedDays = [...selectedDays].sort((a, b) => {
+      const toMon = x => x === 0 ? 7 : x; // Dom=0 → 7 (al final)
+      return toMon(a) - toMon(b);
+    });
+
     const dates = [];
-    for (let w = 0; w < weeks; w++) {
-      for (const wd of selectedDays) {
-        // Calcular la fecha del próximo "wd" a partir de baseDate + w semanas
-        const ref = new Date(baseDate);
-        ref.setDate(ref.getDate() + w * 7);
-        // Ajustar al día de semana correcto dentro de esa semana
-        const refWd  = ref.getDay();
-        const diff   = wd - refWd;
-        const target = new Date(ref);
-        target.setDate(target.getDate() + diff);
-        target.setHours(hour, 0, 0, 0);
-        // Solo incluir si target >= baseDate (no fechas pasadas por el ajuste)
-        if (w === 0 && target < baseDate) continue;
+    const monday = getWeekStart(baseDate); // Lunes de la semana inicial
+    let week = 0;
+
+    while (dates.length < totalOccurrences && week < 500) {
+      for (const wd of sortedDays) {
+        if (dates.length >= totalOccurrences) break;
+        // Offset desde el lunes: Lun=1→0, Mar=2→1,…, Dom=0→6
+        const offset = wd === 0 ? 6 : wd - 1;
+        const target = new Date(monday);
+        target.setDate(target.getDate() + week * 7 + offset);
+        target.setHours(hour, min, 0, 0);
+        // No incluir fechas anteriores a la fecha base
+        if (target < baseDate) continue;
         dates.push(new Date(target));
       }
+      week++;
     }
 
-    // Eliminar duplicados y ordenar
-    const unique = [...new Map(dates.map(dt => [dt.getTime(), dt])).values()]
-      .sort((a, b) => a - b);
-
-    // Guardar en batch (addDoc en secuencia, Firestore free tier no tiene batch write en SDK v9 modular fácilmente)
     const groupId = `group_${Date.now()}`;
-    for (const dt of unique) {
+    for (const dt of dates) {
       await addDoc(collection(db, 'slots'), {
         ...baseData,
         date: Timestamp.fromDate(dt),
         createdAt: Timestamp.now(),
         repeatGroupId: groupId,
-        repeatTotal: unique.length,
+        repeatTotal: dates.length,
       });
     }
+    showToast(`✅ ${dates.length} sesiones creadas`);
+    closeModalSlot();
+    return;
   }
 
   closeModalSlot();
