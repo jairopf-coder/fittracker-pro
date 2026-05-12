@@ -1423,9 +1423,22 @@ function renderPagos() {
       <span class="selection-badge" id="selection-badge"></span>
     </div>
     <div class="payments-toolbar-right">
-      <button class="btn btn-outline btn-sm btn-export" onclick="exportPaymentsCSV()" title="Exportar CSV del mes">
-        ⬇️ Exportar CSV
-      </button>
+      <div class="export-dropdown" id="export-dropdown">
+        <button class="btn btn-outline btn-sm btn-export" onclick="toggleExportDropdown(event)">
+          ⬇️ Exportar <span class="export-caret">▾</span>
+        </button>
+        <div class="export-menu" id="export-menu">
+          <button class="export-menu-item" onclick="exportPaymentsCSV(); closeExportDropdown()">
+            <span>📄</span> CSV
+          </button>
+          <button class="export-menu-item" onclick="exportPaymentsXLSX(); closeExportDropdown()">
+            <span>📊</span> Excel (.xlsx)
+          </button>
+          <button class="export-menu-item" onclick="exportPaymentsPDF(); closeExportDropdown()">
+            <span>📋</span> PDF
+          </button>
+        </div>
+      </div>
     </div>
   </div>`;
 
@@ -1729,4 +1742,206 @@ window.runSearch = function (q) {
   }
 
   results.innerHTML = html;
+};
+
+// ═══════════════════════════════════════════════════════════
+//  EXPORT DROPDOWN
+// ═══════════════════════════════════════════════════════════
+
+window.toggleExportDropdown = function (e) {
+  e.stopPropagation();
+  const menu = document.getElementById('export-menu');
+  if (!menu) return;
+  const isOpen = menu.classList.contains('open');
+  menu.classList.toggle('open', !isOpen);
+};
+
+window.closeExportDropdown = function () {
+  const menu = document.getElementById('export-menu');
+  if (menu) menu.classList.remove('open');
+};
+
+document.addEventListener('click', () => closeExportDropdown());
+
+// ═══════════════════════════════════════════════════════════
+//  EXPORT EXCEL (.xlsx) — SheetJS
+// ═══════════════════════════════════════════════════════════
+window.exportPaymentsXLSX = function () {
+  if (typeof XLSX === 'undefined') { alert('La librería Excel no está disponible aún. Recarga la página.'); return; }
+
+  const y = currentMonth.getFullYear();
+  const m = currentMonth.getMonth();
+  const monthPayments = payments.filter(p => {
+    const d = toDate(p.date);
+    return d.getFullYear() === y && d.getMonth() === m;
+  });
+
+  const toExport = selectedPaymentIds.size > 0
+    ? monthPayments.filter(p => selectedPaymentIds.has(p.id))
+    : monthPayments;
+
+  if (toExport.length === 0) { alert('No hay pagos para exportar'); return; }
+
+  const monthStr  = currentMonth.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+  const total     = toExport.reduce((s, p) => s + (p.amount || 0), 0);
+
+  // Build rows
+  const headers = ['Fecha', 'Cliente', 'Concepto', 'Importe (€)', 'Notas'];
+  const dataRows = toExport.map(p => {
+    const client = clients.find(c => c.id === p.clientId);
+    return [
+      toDate(p.date).toLocaleDateString('es-ES'),
+      client ? client.name : 'Cliente desconocido',
+      conceptLabel(p.concept),
+      parseFloat((p.amount || 0).toFixed(2)),
+      p.notes || '',
+    ];
+  });
+
+  // Totals row
+  const totalsRow = ['', '', 'TOTAL', parseFloat(total.toFixed(2)), ''];
+
+  const wsData = [headers, ...dataRows, totalsRow];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  // Column widths
+  ws['!cols'] = [
+    { wch: 12 }, // Fecha
+    { wch: 24 }, // Cliente
+    { wch: 22 }, // Concepto
+    { wch: 14 }, // Importe
+    { wch: 30 }, // Notas
+  ];
+
+  // Style header row (SheetJS CE supports limited styling via cell format)
+  const headerRange = XLSX.utils.decode_range(ws['!ref']);
+  for (let C = headerRange.s.c; C <= headerRange.e.c; C++) {
+    const addr = XLSX.utils.encode_cell({ r: 0, c: C });
+    if (!ws[addr]) continue;
+    ws[addr].s = { font: { bold: true } };
+  }
+
+  // Style totals row
+  const lastRow = wsData.length - 1;
+  ['A','B','C','D','E'].forEach(col => {
+    const addr = `${col}${lastRow + 1}`;
+    if (ws[addr]) ws[addr].s = { font: { bold: true } };
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Pagos');
+
+  const filename = `pagos-${String(m + 1).padStart(2,'0')}-${y}.xlsx`;
+  XLSX.writeFile(wb, filename);
+};
+
+// ═══════════════════════════════════════════════════════════
+//  EXPORT PDF — jsPDF + autoTable
+// ═══════════════════════════════════════════════════════════
+window.exportPaymentsPDF = function () {
+  if (typeof window.jspdf === 'undefined') { alert('La librería PDF no está disponible aún. Recarga la página.'); return; }
+
+  const { jsPDF } = window.jspdf;
+
+  const y = currentMonth.getFullYear();
+  const m = currentMonth.getMonth();
+  const monthPayments = payments.filter(p => {
+    const d = toDate(p.date);
+    return d.getFullYear() === y && d.getMonth() === m;
+  });
+
+  const toExport = selectedPaymentIds.size > 0
+    ? monthPayments.filter(p => selectedPaymentIds.has(p.id))
+    : monthPayments;
+
+  if (toExport.length === 0) { alert('No hay pagos para exportar'); return; }
+
+  const monthStr = currentMonth.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+  const total    = toExport.reduce((s, p) => s + (p.amount || 0), 0);
+
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+
+  // ── Header ──────────────────────────────────────────────
+  doc.setFillColor(14, 15, 20); // --bg1 dark
+  doc.rect(0, 0, pageW, 38, 'F');
+
+  doc.setTextColor(232, 255, 71); // neon yellow
+  doc.setFontSize(20);
+  doc.setFont('helvetica', 'bold');
+  doc.text('⚡ FitTracker Pro', 14, 16);
+
+  doc.setTextColor(200, 205, 215);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Pagos — ${monthStr}`, 14, 25);
+
+  doc.setTextColor(232, 255, 71);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Total: ${total.toFixed(2)} €`, pageW - 14, 25, { align: 'right' });
+
+  // ── Table ───────────────────────────────────────────────
+  const tableRows = toExport.map(p => {
+    const client = clients.find(c => c.id === p.clientId);
+    return [
+      toDate(p.date).toLocaleDateString('es-ES'),
+      client ? client.name : 'Cliente desconocido',
+      conceptLabel(p.concept),
+      `${(p.amount || 0).toFixed(2)} €`,
+      p.notes || '',
+    ];
+  });
+
+  doc.autoTable({
+    startY: 44,
+    head: [['Fecha', 'Cliente', 'Concepto', 'Importe (€)', 'Notas']],
+    body: tableRows,
+    foot: [['', '', 'TOTAL', `${total.toFixed(2)} €`, '']],
+    theme: 'grid',
+    headStyles: {
+      fillColor: [30, 33, 42],
+      textColor: [232, 255, 71],
+      fontStyle: 'bold',
+      fontSize: 9,
+    },
+    footStyles: {
+      fillColor: [30, 33, 42],
+      textColor: [232, 255, 71],
+      fontStyle: 'bold',
+      fontSize: 9,
+    },
+    bodyStyles: {
+      fontSize: 9,
+      textColor: [30, 33, 42],
+    },
+    alternateRowStyles: {
+      fillColor: [245, 247, 250],
+    },
+    columnStyles: {
+      0: { cellWidth: 24 },
+      1: { cellWidth: 44 },
+      2: { cellWidth: 38 },
+      3: { cellWidth: 26, halign: 'right' },
+      4: { cellWidth: 'auto' },
+    },
+    margin: { left: 14, right: 14 },
+    showFoot: 'lastPage',
+  });
+
+  // ── Footer ───────────────────────────────────────────────
+  const pageCount = doc.internal.getNumberOfPages();
+  const today     = new Date().toLocaleDateString('es-ES', { day:'numeric', month:'long', year:'numeric' });
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    const pageH = doc.internal.pageSize.getHeight();
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(160, 165, 175);
+    doc.text(`Generado el ${today}`, 14, pageH - 8);
+    doc.text(`Página ${i} de ${pageCount}`, pageW - 14, pageH - 8, { align: 'right' });
+  }
+
+  const filename = `pagos-${String(m + 1).padStart(2,'0')}-${y}.pdf`;
+  doc.save(filename);
 };
