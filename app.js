@@ -1584,3 +1584,149 @@ function statusIcon(status) {
 function statusLabel(status) {
   return { scheduled:'Programada', completed:'Completada', pending:'Pendiente confirmación', cancelled:'Cancelada' }[status] || 'Programada';
 }
+
+// ═══════════════════════════════════════════════════════════
+//  GLOBAL SEARCH  (Cmd+K / Ctrl+K)
+// ═══════════════════════════════════════════════════════════
+
+window.openSearch = function () {
+  const overlay = document.getElementById('search-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('hidden');
+  // Small delay so CSS transition fires after display:block
+  requestAnimationFrame(() => {
+    overlay.classList.add('visible');
+    const input = document.getElementById('search-global-input');
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+    document.getElementById('search-results').innerHTML = '';
+  });
+};
+
+window.closeSearch = function (e) {
+  if (e && !e.target.classList.contains('search-overlay')) return;
+  _dismissSearch();
+};
+
+function _dismissSearch() {
+  const overlay = document.getElementById('search-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('visible');
+  setTimeout(() => overlay.classList.add('hidden'), 100);
+}
+
+// Keyboard shortcut: Cmd+K / Ctrl+K, Escape to close
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    const overlay = document.getElementById('search-overlay');
+    const isOpen  = overlay && !overlay.classList.contains('hidden');
+    isOpen ? _dismissSearch() : openSearch();
+    return;
+  }
+  if (e.key === 'Escape') {
+    const overlay = document.getElementById('search-overlay');
+    if (overlay && !overlay.classList.contains('hidden')) {
+      _dismissSearch();
+    }
+  }
+});
+
+window.runSearch = function (q) {
+  const query   = (q || '').toLowerCase().trim();
+  const results = document.getElementById('search-results');
+  if (!results) return;
+
+  if (!query) { results.innerHTML = ''; return; }
+
+  // ── Clientes ─────────────────────────────────────────
+  const matchClients = clients.filter(c =>
+    c.name.toLowerCase().includes(query) ||
+    (c.notes || '').toLowerCase().includes(query)
+  ).slice(0, 4);
+
+  // ── Sesiones ─────────────────────────────────────────
+  const matchSlots = slots.filter(s => {
+    const client = clients.find(c => c.id === s.clientId);
+    return (client && client.name.toLowerCase().includes(query));
+  }).slice(0, 4);
+
+  // ── Pagos ─────────────────────────────────────────────
+  const matchPayments = payments.filter(p =>
+    (p.notes || '').toLowerCase().includes(query) ||
+    (() => { const c = clients.find(x => x.id === p.clientId); return c && c.name.toLowerCase().includes(query); })()
+  ).slice(0, 4);
+
+  const hasResults = matchClients.length + matchSlots.length + matchPayments.length > 0;
+
+  if (!hasResults) {
+    results.innerHTML = `<div class="search-empty">Sin resultados para "<strong>${esc(q)}</strong>"</div>`;
+    return;
+  }
+
+  let html = '';
+
+  if (matchClients.length) {
+    html += `<div class="search-group-header">Clientes</div>`;
+    matchClients.forEach(c => {
+      const initials = c.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+      const meta = [c.phone, c.email].filter(Boolean).join(' · ') || (c.notes ? c.notes.slice(0, 40) : '—');
+      html += `<div class="search-result-item" tabindex="0"
+        onclick="openClientDetail('${c.id}'); _dismissSearch();"
+        onkeydown="if(event.key==='Enter'){openClientDetail('${c.id}');_dismissSearch();}">
+        <div class="search-result-icon">👤</div>
+        <div class="search-result-body">
+          <div class="search-result-name">${esc(c.name)}</div>
+          <div class="search-result-meta">${esc(meta)}</div>
+        </div>
+      </div>`;
+    });
+  }
+
+  if (matchSlots.length) {
+    if (matchClients.length) html += `<div class="search-result-divider"></div>`;
+    html += `<div class="search-group-header">Sesiones</div>`;
+    matchSlots.forEach(s => {
+      const client  = clients.find(c => c.id === s.clientId);
+      const name    = client ? client.name : (s.title || 'Bloqueado');
+      const d       = toDate(s.date);
+      const dateStr = d.toLocaleDateString('es-ES', { weekday:'short', day:'numeric', month:'short' });
+      const timeStr = formatTime(d);
+      const stLabel = statusLabel(s.status || 'scheduled');
+      html += `<div class="search-result-item" tabindex="0"
+        onclick="navigate('calendario'); _dismissSearch();"
+        onkeydown="if(event.key==='Enter'){navigate('calendario');_dismissSearch();}">
+        <div class="search-result-icon">📅</div>
+        <div class="search-result-body">
+          <div class="search-result-name">${esc(name)}</div>
+          <div class="search-result-meta">${esc(dateStr)} · ${timeStr} · ${stLabel}</div>
+        </div>
+      </div>`;
+    });
+  }
+
+  if (matchPayments.length) {
+    if (matchClients.length || matchSlots.length) html += `<div class="search-result-divider"></div>`;
+    html += `<div class="search-group-header">Pagos</div>`;
+    matchPayments.forEach(p => {
+      const client  = clients.find(c => c.id === p.clientId);
+      const name    = client ? client.name : 'Cliente desconocido';
+      const d       = toDate(p.date);
+      const dateStr = d.toLocaleDateString('es-ES', { day:'numeric', month:'short', year:'numeric' });
+      const notes   = p.notes ? ` — ${p.notes}` : '';
+      html += `<div class="search-result-item" tabindex="0"
+        onclick="navigate('pagos'); _dismissSearch();"
+        onkeydown="if(event.key==='Enter'){navigate('pagos');_dismissSearch();}">
+        <div class="search-result-icon">💳</div>
+        <div class="search-result-body">
+          <div class="search-result-name">${esc(name)} · ${(p.amount || 0).toFixed(0)}€</div>
+          <div class="search-result-meta">${esc(dateStr)}${esc(notes)}</div>
+        </div>
+      </div>`;
+    });
+  }
+
+  results.innerHTML = html;
+};
