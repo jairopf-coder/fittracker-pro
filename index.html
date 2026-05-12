@@ -161,11 +161,14 @@
 
     <!-- ── CLIENTES ── -->
     <div id="page-clientes" class="page hidden">
-      <div class="page-header">
-        <h1>Clientes</h1>
-        <button class="btn btn-primary" onclick="openClientModal()">+ Nuevo cliente</button>
+      <div class="page-header page-header--hero">
+        <span class="ph-eyebrow">Gestión</span>
+        <div class="ph-top">
+          <h1>Clientes</h1>
+          <button class="btn btn-primary" onclick="openClientModal()">+ Nuevo cliente</button>
+        </div>
       </div>
-      <div class="toolbar">
+      <div class="toolbar" style="margin-top:24px">
         <input class="search-input" type="search" placeholder="Buscar..." oninput="renderClientes()" id="client-search" />
         <div class="filter-tabs">
           <button class="filter-tab active" data-filter="all" onclick="setClientFilter('all')">Todos</button>
@@ -178,16 +181,19 @@
 
     <!-- ── CALENDARIO ── -->
     <div id="page-calendario" class="page hidden">
-      <div class="page-header">
-        <h1>Calendario</h1>
-        <div class="week-nav">
-          <button class="btn btn-outline btn-sm" onclick="changeWeek(-1)">← Ant</button>
-          <span id="week-label" class="week-label"></span>
-          <button class="btn btn-outline btn-sm" onclick="changeWeek(1)">Sig →</button>
-          <button class="btn btn-sm btn-primary" onclick="goToday()">Hoy</button>
+      <div class="page-header page-header--hero">
+        <span class="ph-eyebrow">Semana</span>
+        <div class="ph-top">
+          <h1>Calendario</h1>
+          <div class="week-nav">
+            <button class="btn btn-outline btn-sm" onclick="changeWeek(-1)">← Ant</button>
+            <span id="week-label" class="week-label"></span>
+            <button class="btn btn-outline btn-sm" onclick="changeWeek(1)">Sig →</button>
+            <button class="btn btn-sm btn-primary" onclick="goToday()">Hoy</button>
+          </div>
         </div>
       </div>
-      <div class="calendar-wrapper">
+      <div class="calendar-wrapper" style="margin-top:24px">
         <div id="calendar-grid" class="calendar-grid"></div>
       </div>
       <!-- Legend -->
@@ -203,15 +209,18 @@
 
     <!-- ── PAGOS ── -->
     <div id="page-pagos" class="page hidden">
-      <div class="page-header">
-        <h1>Pagos</h1>
-        <div class="month-nav">
-          <button class="btn btn-outline btn-sm" onclick="changeMonth(-1)">← Ant</button>
-          <span id="month-label" class="month-label"></span>
-          <button class="btn btn-outline btn-sm" onclick="changeMonth(1)">Sig →</button>
+      <div class="page-header page-header--hero">
+        <span class="ph-eyebrow">Facturación</span>
+        <div class="ph-top">
+          <h1>Pagos</h1>
+          <div class="month-nav">
+            <button class="btn btn-outline btn-sm" onclick="changeMonth(-1)">← Ant</button>
+            <span id="month-label" class="month-label"></span>
+            <button class="btn btn-outline btn-sm" onclick="changeMonth(1)">Sig →</button>
+          </div>
         </div>
       </div>
-      <div id="payments-summary" class="stats-grid" style="margin-bottom:24px"></div>
+      <div id="payments-summary" class="stats-grid" style="margin-top:24px;margin-bottom:24px"></div>
       <div id="payments-list" class="payments-list"></div>
     </div>
 

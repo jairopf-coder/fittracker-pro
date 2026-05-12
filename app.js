@@ -457,12 +457,15 @@ window.openClientDetail = function (id) {
 
   const page = $('page-client-detail');
   page.innerHTML = `
-    <div class="page-header">
-      <div style="display:flex;align-items:center;gap:12px">
-        <button class="btn btn-outline btn-sm" onclick="navigate('clientes')">← Volver</button>
-        <h1>${esc(c.name)}</h1>
+    <div class="page-header page-header--hero">
+      <span class="ph-eyebrow">Ficha de cliente</span>
+      <div class="ph-top">
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="btn btn-outline btn-sm" onclick="navigate('clientes')">← Volver</button>
+          <h1>${esc(c.name)}</h1>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="openClientModal('${c.id}')">✏️ Editar</button>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="openClientModal('${c.id}')">✏️ Editar</button>
     </div>
 
     <div class="detail-hero">
