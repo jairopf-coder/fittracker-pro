@@ -117,7 +117,7 @@ window.toggleNotifications = function () {
 
 // Sincronizar UI al cargar
 document.addEventListener('DOMContentLoaded', _updateNotifUI);
-
+document.addEventListener('DOMContentLoaded', loadNotifConfig);
 // ═══════════════════════════════════════════════════════════
 //  SERVICE WORKER — registro
 //  Se registra sw.js en cuanto el DOM esté listo.
@@ -247,6 +247,37 @@ function refreshAll() {
   scheduleSessionNotifications();
 }
 
+// ── Notificaciones config ──────────────────────────────────
+function loadNotifConfig() {
+  const minutes   = parseInt(localStorage.getItem('notif-minutes')        || '30', 10);
+  const threshold = parseInt(localStorage.getItem('notif-bono-threshold') || '2',  10);
+
+  const selMin = document.getElementById('notif-minutes');
+  const selThr = document.getElementById('notif-bono-threshold');
+  if (selMin) selMin.value = String(minutes);
+  if (selThr) selThr.value = String(threshold);
+}
+
+window.saveNotifConfig = function () {
+  const selMin = document.getElementById('notif-minutes');
+  const selThr = document.getElementById('notif-bono-threshold');
+  if (selMin) localStorage.setItem('notif-minutes',        selMin.value);
+  if (selThr) localStorage.setItem('notif-bono-threshold', selThr.value);
+  // Reprogramar con nueva config
+  scheduleSessionNotifications();
+  showToast('Configuración guardada', 'success');
+};
+
+window.openNotifHelp = function () {
+  const modal = document.getElementById('modal-notif-help');
+  if (modal) modal.classList.remove('hidden');
+};
+window.closeNotifHelp = function (e) {
+  if (e && e.target !== document.getElementById('modal-notif-help')) return;
+  const modal = document.getElementById('modal-notif-help');
+  if (modal) modal.classList.add('hidden');
+};
+
 // ═══════════════════════════════════════════════════════════
 //  NOTIFICACIONES LOCALES
 //  Usa el Service Worker (sw.js) para mostrar notificaciones
@@ -276,32 +307,39 @@ async function scheduleSessionNotifications() {
     const client = clients.find(c => c.id === slot.clientId);
     const clientName = client ? client.name : 'Cliente';
 
+    // Minutos antes configurados por el usuario (default 30)
+    const minutesBefore = parseInt(localStorage.getItem('notif-minutes') || '30', 10);
+
     // Construir la hora de la sesión (slot.time = "HH:MM")
     const [h, m] = (slot.time || '00:00').split(':').map(Number);
     const sessionDate = new Date();
     sessionDate.setHours(h, m, 0, 0);
 
-    // 30 minutos antes
-    const notifTime = new Date(sessionDate.getTime() - 30 * 60 * 1000);
+    // X minutos antes (según config)
+    const notifTime = new Date(sessionDate.getTime() - minutesBefore * 60 * 1000);
     const delay = notifTime.getTime() - now.getTime();
 
     // Solo programar si la notificación es en el futuro
     if (delay > 0) {
       const tag = `session-${slot.id}`;
       const timeLabel = slot.time || `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`;
+      const minLabel  = minutesBefore >= 60
+        ? `${minutesBefore / 60}h`
+        : `${minutesBefore} min`;
       swReg.active.postMessage({
         type:  'SCHEDULE_NOTIFICATION',
         delay,
-        title: 'FitTracker · en 30 min',
+        title: `FitTracker · en ${minLabel}`,
         body:  `${clientName} · ${timeLabel}`,
         tag,
       });
     }
   }
 
-  // 3) Notificaciones inmediatas por bonos bajos (≤2 sesiones)
+  // 3) Notificaciones inmediatas por bonos bajos (según umbral configurado)
+  const bonoThreshold = parseInt(localStorage.getItem('notif-bono-threshold') || '2', 10);
   const lowBono = clients.filter(
-    c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= 2
+    c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= bonoThreshold
   );
 
   for (const c of lowBono) {
@@ -513,8 +551,9 @@ function renderDashboard() {
   const activeClients = clients.filter(c => c.active);
   const totalRevenue  = payments.reduce((s, p) => s + (p.amount || 0), 0);
 
-  // Alerts: bonos con ≤2 sesiones
-  const alerts = clients.filter(c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= 2);
+  // Alerts: bonos con ≤N sesiones (según config)
+  const bonoThr = parseInt(localStorage.getItem('notif-bono-threshold') || '2', 10);
+  const alerts = clients.filter(c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= bonoThr);
   updateBadges(alerts.length);
 
   // Hero: sesiones de hoy (excluye canceladas)
@@ -715,7 +754,7 @@ window.renderClientes = function () {
       (c.phone || '').includes(search) ||
       (c.email || '').toLowerCase().includes(search);
     if (clientFilter === 'active') return match && c.active;
-    if (clientFilter === 'alert')  return match && c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= 2;
+    if (clientFilter === 'alert')  return match && c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= parseInt(localStorage.getItem('notif-bono-threshold') || '2', 10);
     return match;
   });
 
@@ -1566,7 +1605,7 @@ window.closeModalPayment = function (e) {
 // ═══════════════════════════════════════════════════════════
 function updateBadges(count) {
   if (count === undefined) {
-    count = clients.filter(c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= 2).length;
+    count = clients.filter(c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= parseInt(localStorage.getItem('notif-bono-threshold') || '2', 10)).length;
   }
   const els = [$('nav-badge'), $('topbar-badge'), $('bottom-badge')];
   els.forEach(el => {

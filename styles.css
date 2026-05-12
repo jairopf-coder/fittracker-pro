@@ -1709,3 +1709,98 @@ select { -webkit-appearance: none; appearance: none; }
 .export-menu-item + .export-menu-item {
   border-top: 1px solid var(--border);
 }
+
+/* ═══════════════════════════════════════════════════════════
+   NOTIFICACIONES — CONFIG PANEL
+═══════════════════════════════════════════════════════════ */
+.notif-config-panel {
+  margin: 2px 10px 6px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fadeInUp .18s ease both;
+}
+.notif-config-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.notif-config-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text2);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notif-config-select {
+  width: auto;
+  min-width: 0;
+  flex-shrink: 0;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 7px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  font-family: 'Syne', sans-serif;
+}
+.notif-config-select:focus { outline: none; border-color: var(--accent); }
+.notif-help-btn {
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-family: 'Syne', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 0 0;
+  text-align: left;
+  transition: color .15s;
+  letter-spacing: .2px;
+}
+.notif-help-btn:hover { color: var(--accent); }
+
+/* ── Notif help modal ── */
+.notif-help-steps { display: flex; flex-direction: column; gap: 18px; }
+.notif-help-section { display: flex; flex-direction: column; gap: 8px; }
+.notif-help-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.notif-help-list {
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+}
+.notif-help-list li { padding-left: 4px; }
+.notif-help-icon { font-size: 14px; }
+.notif-help-note {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.55;
+}
+.notif-help-note--warn {
+  background: rgba(245,158,11,.08);
+  border-color: rgba(245,158,11,.25);
+  color: var(--orange);
+}

@@ -99,6 +99,35 @@
           <span class="theme-toggle-thumb notif-toggle-thumb" id="notif-thumb"></span>
         </span>
       </button>
+
+      <!-- ── Notificaciones config panel ── -->
+      <div class="notif-config-panel" id="notif-config-panel">
+        <div class="notif-config-row">
+          <span class="notif-config-label">⏰ Avisar antes de sesión</span>
+          <select class="notif-config-select" id="notif-minutes" onchange="saveNotifConfig()">
+            <option value="10">10 min</option>
+            <option value="15">15 min</option>
+            <option value="30" selected>30 min</option>
+            <option value="45">45 min</option>
+            <option value="60">1 hora</option>
+            <option value="90">1:30 h</option>
+            <option value="120">2 horas</option>
+          </select>
+        </div>
+        <div class="notif-config-row">
+          <span class="notif-config-label">📦 Alerta bono bajo</span>
+          <select class="notif-config-select" id="notif-bono-threshold" onchange="saveNotifConfig()">
+            <option value="1">≤ 1 sesión</option>
+            <option value="2" selected>≤ 2 sesiones</option>
+            <option value="3">≤ 3 sesiones</option>
+            <option value="5">≤ 5 sesiones</option>
+          </select>
+        </div>
+        <button class="notif-help-btn" onclick="openNotifHelp()">
+          ❓ Cómo activar en iPhone
+        </button>
+      </div>
+
       <button class="nav-item logout-btn" onclick="doLogout()">
         <span class="nav-icon">🚪</span><span class="nav-label">Salir</span>
       </button>
@@ -497,6 +526,67 @@
       <kbd class="search-esc-hint">ESC</kbd>
     </div>
     <div id="search-results" class="search-results"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     MODAL AYUDA NOTIFICACIONES
+═══════════════════════════════════════════ -->
+<div id="modal-notif-help" class="modal-overlay hidden" onclick="closeNotifHelp(event)">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <h2>🔔 Activar notificaciones en iPhone</h2>
+      <button class="close-btn" onclick="closeNotifHelp()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="notif-help-steps">
+
+        <div class="notif-help-section">
+          <div class="notif-help-section-title">Requisito previo</div>
+          <div class="notif-help-note">
+            Safari en iOS 16.4+ soporta notificaciones <strong>solo si la app está instalada</strong> en pantalla de inicio. No funcionan abriendo la web desde Safari directamente.
+          </div>
+        </div>
+
+        <div class="notif-help-section">
+          <div class="notif-help-section-title">Paso 1 — Instalar la app</div>
+          <ol class="notif-help-list">
+            <li>Abre Safari y ve a <strong>fittracker-pro</strong></li>
+            <li>Pulsa el botón <strong>Compartir</strong> <span class="notif-help-icon">⬆️</span> (barra inferior)</li>
+            <li>Toca <strong>"Añadir a pantalla de inicio"</strong></li>
+            <li>Confirma con <strong>"Añadir"</strong></li>
+          </ol>
+        </div>
+
+        <div class="notif-help-section">
+          <div class="notif-help-section-title">Paso 2 — Activar notificaciones</div>
+          <ol class="notif-help-list">
+            <li>Abre la app <strong>desde el icono del escritorio</strong> (no desde Safari)</li>
+            <li>El sistema pedirá permiso de notificaciones — toca <strong>"Permitir"</strong></li>
+            <li>Activa el toggle de notificaciones en el menú lateral</li>
+          </ol>
+        </div>
+
+        <div class="notif-help-section">
+          <div class="notif-help-section-title">Si no aparece el permiso</div>
+          <ol class="notif-help-list">
+            <li>Ve a <strong>Ajustes del iPhone → FitTracker Pro</strong></li>
+            <li>Activa <strong>"Notificaciones"</strong></li>
+          </ol>
+        </div>
+
+        <div class="notif-help-section">
+          <div class="notif-help-section-title">⚠️ Limitaciones importantes</div>
+          <div class="notif-help-note notif-help-note--warn">
+            Los recordatorios de sesiones solo funcionan si el iPhone está encendido y la app fue abierta ese día. Apple no permite notificaciones en background real para PWAs. Las alertas de bonos aparecen siempre al abrir la app.
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeNotifHelp()">Entendido</button>
+    </div>
   </div>
 </div>
 
