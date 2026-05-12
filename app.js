@@ -454,7 +454,6 @@ function renderDashboard() {
   if (window._chartSesiones) { window._chartSesiones.destroy(); window._chartSesiones = null; }
   const ctxSes = $('chart-sesiones');
   if (ctxSes) {
-    ctxSes.height = 120;
     window._chartSesiones = new Chart(ctxSes, {
       type: 'bar',
       data: {
@@ -484,7 +483,6 @@ function renderDashboard() {
   if (window._chartIngresos) { window._chartIngresos.destroy(); window._chartIngresos = null; }
   const ctxIng = $('chart-ingresos');
   if (ctxIng) {
-    ctxIng.height = 100;
     window._chartIngresos = new Chart(ctxIng, {
       type: 'line',
       data: {

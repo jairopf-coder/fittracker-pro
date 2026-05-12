@@ -1383,9 +1383,18 @@ select { -webkit-appearance: none; appearance: none; }
   text-transform: uppercase;
   letter-spacing: 1px;
 }
-.dash-chart-wrap canvas {
-  display: block;
-  width: 100% !important;
+.dash-chart-canvas-ses {
+  position: relative;
+  height: 120px;
+}
+.dash-chart-canvas-ing {
+  position: relative;
+  height: 100px;
+}
+.dash-chart-canvas-ses canvas,
+.dash-chart-canvas-ing canvas {
+  position: absolute;
+  inset: 0;
 }
 @media (max-width: 600px) {
   .dash-charts-row { grid-template-columns: 1fr; gap: 20px; }
