@@ -67,6 +67,72 @@ function _updateThemeUI() {
 document.addEventListener('DOMContentLoaded', _updateThemeUI);
 
 // ═══════════════════════════════════════════════════════════
+//  NOTIFICACIONES — toggle UI
+// ═══════════════════════════════════════════════════════════
+
+// Actualiza el aspecto visual del toggle según el estado actual
+function _updateNotifUI() {
+  const btn   = document.getElementById('notif-toggle-btn');
+  const icon  = document.getElementById('notif-icon');
+  const track = document.getElementById('notif-track');
+  if (!btn || !track) return;
+
+  const permission = 'Notification' in window ? Notification.permission : 'denied';
+  const enabled    = localStorage.getItem('notif-enabled') !== '0';
+
+  if (permission === 'denied') {
+    // Permiso denegado a nivel navegador: icono tachado, tooltip, track rojo
+    if (icon) icon.textContent = '🔕';
+    btn.setAttribute('data-denied', 'true');
+    btn.setAttribute('data-tooltip', 'Actívalas en tu navegador');
+    track.classList.remove('notif-on');
+    track.classList.add('notif-denied');
+  } else {
+    if (icon) icon.textContent = '🔔';
+    btn.removeAttribute('data-denied');
+    btn.removeAttribute('data-tooltip');
+    track.classList.remove('notif-denied');
+    if (enabled) {
+      track.classList.add('notif-on');
+    } else {
+      track.classList.remove('notif-on');
+    }
+  }
+}
+
+// Llamada desde onclick del botón
+window.toggleNotifications = function () {
+  const permission = 'Notification' in window ? Notification.permission : 'denied';
+  // Si el permiso está denegado a nivel navegador, no hacer nada
+  // (el tooltip ya informa al usuario)
+  if (permission === 'denied') return;
+
+  const current = localStorage.getItem('notif-enabled') !== '0';
+  localStorage.setItem('notif-enabled', current ? '0' : '1');
+  _updateNotifUI();
+
+  // Reprogramar (o cancelar) según el nuevo estado
+  scheduleSessionNotifications();
+};
+
+// Sincronizar UI al cargar
+document.addEventListener('DOMContentLoaded', _updateNotifUI);
+
+// ═══════════════════════════════════════════════════════════
+//  SERVICE WORKER — registro
+//  Se registra sw.js en cuanto el DOM esté listo.
+//  El SW vive en la raíz del proyecto para tener alcance
+//  sobre toda la app.
+// ═══════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => console.log('[SW] registrado, scope:', reg.scope))
+      .catch(err => console.warn('[SW] error al registrar:', err));
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 //  AUTH
 // ═══════════════════════════════════════════════════════════
 onAuthStateChanged(auth, user => {
@@ -74,6 +140,18 @@ onAuthStateChanged(auth, user => {
     show('app'); hide('page-login');
     startListeners();
     navigate('dashboard');
+
+    // ── Pedir permiso de notificaciones (solo la primera vez) ──
+    // Se guarda en localStorage 'notif-asked' para no molestar
+    // al usuario más de una vez.
+    if ('Notification' in window && !localStorage.getItem('notif-asked')) {
+      localStorage.setItem('notif-asked', '1');
+      Notification.requestPermission().then(perm => {
+        console.log('[Notif] permiso:', perm);
+        // Actualizar el icono del toggle según la respuesta del usuario
+        _updateNotifUI();
+      });
+    }
   } else {
     hide('app'); show('page-login');
     stopListeners();
@@ -164,6 +242,77 @@ function refreshAll() {
   renderCalendario();
   renderPagos();
   updateBadges();
+
+  // ── Reprogramar notificaciones cada vez que cambian datos ──
+  scheduleSessionNotifications();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  NOTIFICACIONES LOCALES
+//  Usa el Service Worker (sw.js) para mostrar notificaciones
+//  sin servidor externo.
+//
+//  • 30 min antes de cada sesión del día (no canceladas)
+//  • Inmediata si algún cliente bono tiene ≤2 sesiones
+// ═══════════════════════════════════════════════════════════
+async function scheduleSessionNotifications() {
+  // Necesitamos permiso, toggle ON y SW activo
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (localStorage.getItem('notif-enabled') === '0') return;
+  if (!('serviceWorker' in navigator)) return;
+
+  const swReg = await navigator.serviceWorker.ready.catch(() => null);
+  if (!swReg || !swReg.active) return;
+
+  // 1) Cancelar todas las notificaciones programadas anteriores
+  swReg.active.postMessage({ type: 'CANCEL_ALL_NOTIFICATIONS' });
+
+  const now = new Date();
+
+  // 2) Sesiones de hoy (excluye canceladas)
+  const todaySlots = slots.filter(s => isToday(toDate(s.date)) && s.status !== 'cancelled');
+
+  for (const slot of todaySlots) {
+    const client = clients.find(c => c.id === slot.clientId);
+    const clientName = client ? client.name : 'Cliente';
+
+    // Construir la hora de la sesión (slot.time = "HH:MM")
+    const [h, m] = (slot.time || '00:00').split(':').map(Number);
+    const sessionDate = new Date();
+    sessionDate.setHours(h, m, 0, 0);
+
+    // 30 minutos antes
+    const notifTime = new Date(sessionDate.getTime() - 30 * 60 * 1000);
+    const delay = notifTime.getTime() - now.getTime();
+
+    // Solo programar si la notificación es en el futuro
+    if (delay > 0) {
+      const tag = `session-${slot.id}`;
+      const timeLabel = slot.time || `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`;
+      swReg.active.postMessage({
+        type:  'SCHEDULE_NOTIFICATION',
+        delay,
+        title: 'FitTracker · en 30 min',
+        body:  `${clientName} · ${timeLabel}`,
+        tag,
+      });
+    }
+  }
+
+  // 3) Notificaciones inmediatas por bonos bajos (≤2 sesiones)
+  const lowBono = clients.filter(
+    c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= 2
+  );
+
+  for (const c of lowBono) {
+    const left = c.sessionsLeft || 0;
+    swReg.active.postMessage({
+      type:  'SHOW_NOTIFICATION',
+      title: `Bono bajo: ${c.name}`,
+      body:  `Solo tiene ${left} sesión${left === 1 ? '' : 'es'} restante${left === 1 ? '' : 's'}`,
+      tag:   `bono-${c.id}`,
+    });
+  }
 }
 
 // ═══════════════════════════════════════════════════════════

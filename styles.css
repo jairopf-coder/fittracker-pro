@@ -968,6 +968,40 @@ select { -webkit-appearance: none; appearance: none; }
   background: #fff;
 }
 
+/* ── Notificaciones toggle ── */
+/* Track ON (notif activas) */
+.notif-toggle-track.notif-on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.notif-toggle-track.notif-on .notif-toggle-thumb {
+  transform: translateX(16px);
+  background: #0d0f14;
+}
+/* Estado denied: track rojo suave */
+.notif-toggle-track.notif-denied {
+  background: rgba(239,68,68,.25);
+  border-color: var(--red);
+}
+/* Tooltip "Actívalas en tu navegador" */
+.notif-toggle {
+  position: relative;
+}
+.notif-toggle[data-denied="true"]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px); left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg3); color: var(--text);
+  font-size: 11px; font-weight: 500;
+  padding: 5px 9px; border-radius: 7px;
+  border: 1px solid var(--border);
+  white-space: nowrap; pointer-events: none;
+  opacity: 0; transition: opacity .15s;
+  z-index: 200;
+}
+.notif-toggle[data-denied="true"]:hover::after { opacity: 1; }
+
 /* ═══════════════════════════════════════════════════════════
    PAGE TRANSITION — fade 150ms
 ═══════════════════════════════════════════════════════════ */
