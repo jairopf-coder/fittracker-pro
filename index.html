@@ -98,26 +98,53 @@
   <main id="main-content" class="main-content">
 
     <!-- ── DASHBOARD ── -->
-    <div id="page-dashboard" class="page">
-      <div class="page-header">
-        <h1>Dashboard</h1>
-        <span id="dash-date" class="date-badge"></span>
+    <div id="page-dashboard" class="page dash-page">
+      <!-- Hero -->
+      <div class="dash-hero">
+        <div class="dash-hero-left">
+          <div class="dash-greeting" id="dash-greeting">Buenos días</div>
+          <div class="dash-hero-metric">
+            <span class="dash-hero-number" id="dash-hero-sessions">—</span>
+            <span class="dash-hero-unit">sesiones hoy</span>
+          </div>
+          <span class="dash-date-label" id="dash-date"></span>
+        </div>
+        <div id="dash-alerts"></div>
       </div>
-      <div id="dash-alerts"></div>
-      <div class="stats-grid" id="dash-stats"></div>
-      <div class="section">
-        <div class="section-header">
-          <h2>Sesiones de Hoy</h2>
-          <button class="btn btn-sm btn-primary" onclick="navigate('calendario')">Ver calendario</button>
+
+      <!-- KPI row -->
+      <div class="dash-kpi-row" id="dash-stats"></div>
+
+      <!-- Timeline sesiones hoy -->
+      <div class="dash-section">
+        <div class="dash-section-header">
+          <span class="dash-section-label">Hoy</span>
+          <button class="btn btn-sm btn-outline" onclick="navigate('calendario')">Ver calendario</button>
         </div>
         <div id="dash-today"></div>
       </div>
-      <div class="section">
-        <div class="section-header">
-          <h2>Estado de Bonos</h2>
+
+      <!-- Charts -->
+      <div class="dash-section">
+        <div class="dash-charts-row">
+          <div class="dash-chart-wrap">
+            <span class="dash-chart-label">Sesiones / 7 días</span>
+            <canvas id="chart-sesiones"></canvas>
+          </div>
+          <div class="dash-chart-wrap">
+            <span class="dash-chart-label">Ingresos / 6 meses</span>
+            <canvas id="chart-ingresos"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bonos rings -->
+      <div class="dash-section">
+        <div class="dash-section-header">
+          <span class="dash-section-label">Bonos</span>
           <button class="btn btn-sm btn-outline" onclick="navigate('clientes')">Ver todos</button>
         </div>
-        <div id="dash-bonos" class="bono-list"></div>
+        <div id="dash-bonos" class="dash-rings-row"></div>
       </div>
     </div>
 
@@ -442,6 +469,7 @@
 <!-- ═══════════════════════════════════════════
      FIREBASE + APP JS
 ═══════════════════════════════════════════ -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="firebase-config.js"></script>
 <script type="module" src="app.js"></script>
 <!-- Calendar event tooltip -->

@@ -350,7 +350,14 @@ function renderDashboard() {
   if (currentPage !== 'dashboard') return;
   if (!dataLoaded.clients || !dataLoaded.slots || !dataLoaded.payments) return;
 
-  $('dash-date').textContent = new Date().toLocaleDateString('es-ES', { weekday:'long', day:'numeric', month:'long' });
+  const now = new Date();
+  const hour = now.getHours();
+  const greeting = hour < 13 ? 'Buenos días' : hour < 20 ? 'Buenas tardes' : 'Buenas noches';
+  const dateStr = now.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+
+  if ($('dash-greeting')) $('dash-greeting').textContent = greeting;
+  if ($('dash-date'))     $('dash-date').textContent = dateStr;
+
   const activeClients = clients.filter(c => c.active);
   const totalRevenue  = payments.reduce((s, p) => s + (p.amount || 0), 0);
 
@@ -358,101 +365,182 @@ function renderDashboard() {
   const alerts = clients.filter(c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= 2);
   updateBadges(alerts.length);
 
+  // Hero: sesiones de hoy (excluye canceladas)
+  const todaySlots = slots.filter(s => isToday(toDate(s.date)) && s.status !== 'cancelled');
+  if ($('dash-hero-sessions')) $('dash-hero-sessions').textContent = todaySlots.length;
+
+  // Alert pill en hero
   const alertsEl = $('dash-alerts');
   if (alerts.length === 0) {
     alertsEl.innerHTML = '';
   } else {
-    alertsEl.innerHTML = `
-      <div class="alert-section">
-        <div class="alert-section-title">🔔 Alertas de renovación</div>
-        ${alerts.map(c => `
-          <div class="alert-card ${c.sessionsLeft === 0 ? 'alert-danger' : 'alert-warning'}">
-            <span class="alert-icon">${c.sessionsLeft === 0 ? '🚨' : '⚠️'}</span>
-            <div>
-              <strong>${esc(c.name)}</strong>
-              ${c.sessionsLeft === 0
-                ? ' — Sin sesiones. ¡Necesita renovar!'
-                : ` — Solo quedan ${c.sessionsLeft} sesión${c.sessionsLeft !== 1 ? 'es' : ''}`}
-            </div>
-            <button class="btn btn-sm btn-outline" onclick="openClientModal('${c.id}')">Ver</button>
-          </div>
-        `).join('')}
-      </div>`;
+    alertsEl.innerHTML = `<button class="dash-alert-pill" onclick="navigate('clientes')">
+      <span class="dash-alert-dot"></span>
+      ${alerts.length} bono${alerts.length !== 1 ? 's' : ''} bajo
+    </button>`;
   }
 
-  // Contar sesiones de hoy (excluye canceladas)
-  const todaySlots = slots.filter(s => {
-    const d = toDate(s.date);
-    return isToday(d) && s.status !== 'cancelled';
-  });
-  const weekSlots = slots.filter(s => {
-    const d = toDate(s.date);
-    return isThisWeek(d) && s.status !== 'cancelled';
-  });
-
-  // Trend: sesiones esta semana vs semana anterior
+  // Semana actual vs anterior
+  const weekSlots = slots.filter(s => isThisWeek(toDate(s.date)) && s.status !== 'cancelled');
   const prevWeekStart = getWeekStart(new Date()); prevWeekStart.setDate(prevWeekStart.getDate() - 7);
   const prevWeekEnd   = new Date(prevWeekStart); prevWeekEnd.setDate(prevWeekEnd.getDate() + 6);
   const prevWeekSlots = slots.filter(s => { const d = toDate(s.date); return d >= prevWeekStart && d <= prevWeekEnd && s.status !== 'cancelled'; });
-  const prevMonthRevenue = payments.filter(p => { const d = toDate(p.date); const n = new Date(); return d.getMonth() === (n.getMonth() === 0 ? 11 : n.getMonth()-1); }).reduce((s,p) => s+(p.amount||0), 0);
 
-  function trendHtml(curr, prev, unit='') {
-    if (prev === 0 && curr === 0) return `<span class="stat-trend flat">— sin datos</span>`;
-    if (prev === 0) return `<span class="stat-trend up">▲ nuevo</span>`;
+  function kpiTrend(curr, prev) {
+    if (prev === 0 && curr === 0) return `<span class="dash-kpi-trend flat">sin datos</span>`;
+    if (prev === 0) return `<span class="dash-kpi-trend up">▲ nuevo</span>`;
     const diff = curr - prev;
     const pct  = Math.round(Math.abs(diff / prev) * 100);
-    if (diff > 0) return `<span class="stat-trend up">▲ +${pct}% vs anterior</span>`;
-    if (diff < 0) return `<span class="stat-trend down">▼ −${pct}% vs anterior</span>`;
-    return `<span class="stat-trend flat">= igual que antes</span>`;
+    if (diff > 0) return `<span class="dash-kpi-trend up">▲ +${pct}%</span>`;
+    if (diff < 0) return `<span class="dash-kpi-trend down">▼ ${pct}%</span>`;
+    return `<span class="dash-kpi-trend flat">= igual</span>`;
   }
 
   $('dash-stats').innerHTML = `
-    <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-value">${activeClients.length}</div><div class="stat-label">Clientes activos</div></div>
-    <div class="stat-card"><div class="stat-icon">📅</div><div class="stat-value">${todaySlots.length}</div><div class="stat-label">Sesiones hoy</div></div>
-    <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-value">${weekSlots.length}</div><div class="stat-label">Esta semana</div>${trendHtml(weekSlots.length, prevWeekSlots.length)}</div>
-    <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-value">${totalRevenue.toFixed(0)}€</div><div class="stat-label">Total facturado</div>${trendHtml(totalRevenue, prevMonthRevenue)}</div>
+    <div class="dash-kpi">
+      <span class="dash-kpi-label">Clientes activos</span>
+      <span class="dash-kpi-value">${activeClients.length}</span>
+    </div>
+    <div class="dash-kpi">
+      <span class="dash-kpi-label">Sesiones semana</span>
+      <span class="dash-kpi-value">${weekSlots.length}</span>
+      ${kpiTrend(weekSlots.length, prevWeekSlots.length)}
+    </div>
+    <div class="dash-kpi">
+      <span class="dash-kpi-label">Tendencia</span>
+      <span class="dash-kpi-value" style="font-size:20px;letter-spacing:0">${weekSlots.length >= prevWeekSlots.length ? '▲' : '▼'}</span>
+      ${kpiTrend(weekSlots.length, prevWeekSlots.length)}
+    </div>
+    <div class="dash-kpi">
+      <span class="dash-kpi-label">Ingresos totales</span>
+      <span class="dash-kpi-value">${totalRevenue.toFixed(0)}€</span>
+    </div>
   `;
 
-  // Today sessions (incluye pendientes y canceladas para visibilidad)
+  // Timeline sesiones hoy
   const todayAll = slots.filter(s => isToday(toDate(s.date)));
   const todayEl = $('dash-today');
   if (todayAll.length === 0) {
-    todayEl.innerHTML = `<div class="empty-state"><span>🏖️</span><p>Sin sesiones hoy</p></div>`;
+    todayEl.innerHTML = `<p class="dash-empty">Sin sesiones programadas para hoy</p>`;
   } else {
-    todayEl.innerHTML = `<div class="session-list">
+    const statusCls = st => st === 'completed' ? 'completed' : st === 'pending' ? 'pending' : st === 'cancelled' ? 'cancelled' : 'scheduled';
+    const statusTxt = st => st === 'completed' ? 'Completada' : st === 'pending' ? 'Pendiente' : st === 'cancelled' ? 'Cancelada' : 'Programada';
+    todayEl.innerHTML = `<div class="dash-timeline">
       ${todayAll.sort((a,b) => toDate(a.date)-toDate(b.date)).map(s => {
         const client = clients.find(c => c.id === s.clientId);
         const name   = client ? client.name : (s.title || 'Bloqueado');
-        const icon   = statusIcon(s.status);
-        const cls    = s.status === 'completed' ? 'completed' : s.status === 'pending' ? 'pending' : s.status === 'cancelled' ? 'cancelled' : '';
-        return `<div class="session-item ${cls}">
-          <div class="session-time">${formatTime(toDate(s.date))}</div>
-          <div class="session-info">
-            <strong>${esc(name)}</strong>
-            <span>${statusLabel(s.status)}${s.notes ? ' · ' + esc(s.notes) : ''}</span>
-          </div>
-          <div class="session-status">${icon}</div>
+        const cls    = statusCls(s.status);
+        return `<div class="dash-tl-item">
+          <span class="dash-tl-dot ${cls}"></span>
+          <span class="dash-tl-time">${formatTime(toDate(s.date))}</span>
+          <span class="dash-tl-name">${esc(name)}</span>
+          <span class="dash-tl-status ${cls}">${statusTxt(s.status)}</span>
         </div>`;
       }).join('')}
     </div>`;
   }
 
-  // Bonos
+  // Charts
+  // — Sesiones por día (últimos 7 días)
+  const sesLabels = [];
+  const sesCounts = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i); d.setHours(0,0,0,0);
+    const next = new Date(d); next.setDate(d.getDate() + 1);
+    sesLabels.push(d.toLocaleDateString('es-ES', { weekday: 'short' }));
+    sesCounts.push(slots.filter(s => { const sd = toDate(s.date); return sd >= d && sd < next && s.status !== 'cancelled'; }).length);
+  }
+
+  if (window._chartSesiones) { window._chartSesiones.destroy(); window._chartSesiones = null; }
+  const ctxSes = $('chart-sesiones');
+  if (ctxSes) {
+    ctxSes.height = 120;
+    window._chartSesiones = new Chart(ctxSes, {
+      type: 'bar',
+      data: {
+        labels: sesLabels,
+        datasets: [{ data: sesCounts, backgroundColor: '#e8ff47', borderRadius: 6, borderSkipped: false }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y} ses.` } } },
+        scales: {
+          x: { grid: { display: false }, border: { display: false }, ticks: { color: 'rgba(122,131,148,0.7)', font: { size: 10, family: 'Syne' } } },
+          y: { display: false, grid: { display: false } }
+        }
+      }
+    });
+  }
+
+  // — Ingresos por mes (últimos 6 meses)
+  const ingLabels = [];
+  const ingTotals = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i);
+    ingLabels.push(d.toLocaleDateString('es-ES', { month: 'short' }));
+    ingTotals.push(payments.filter(p => { const pd = toDate(p.date); return pd.getFullYear() === d.getFullYear() && pd.getMonth() === d.getMonth(); }).reduce((s, p) => s + (p.amount || 0), 0));
+  }
+
+  if (window._chartIngresos) { window._chartIngresos.destroy(); window._chartIngresos = null; }
+  const ctxIng = $('chart-ingresos');
+  if (ctxIng) {
+    ctxIng.height = 100;
+    window._chartIngresos = new Chart(ctxIng, {
+      type: 'line',
+      data: {
+        labels: ingLabels,
+        datasets: [{
+          data: ingTotals,
+          borderColor: '#47b8ff',
+          borderWidth: 2,
+          tension: 0.4,
+          pointRadius: 0,
+          fill: true,
+          backgroundColor: 'rgba(71,184,255,0.10)'
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y.toFixed(0)}€` } } },
+        scales: {
+          x: { grid: { display: false }, border: { display: false }, ticks: { color: 'rgba(122,131,148,0.7)', font: { size: 10, family: 'Syne' } } },
+          y: { display: false, grid: { display: false }, border: { display: false } }
+        }
+      }
+    });
+  }
+
+  // Bono rings SVG
   const bonosEl = $('dash-bonos');
-  const bonoClients = activeClients.filter(c => c.paymentType === 'bono').slice(0, 8);
+  const bonoClients = activeClients.filter(c => c.paymentType === 'bono').slice(0, 6);
   if (bonoClients.length === 0) {
-    bonosEl.innerHTML = `<div class="empty-state"><span>📦</span><p>Sin clientes con bono</p></div>`;
+    bonosEl.innerHTML = `<p class="dash-empty">Sin clientes con bono activo</p>`;
   } else {
+    const R = 26; // radio del ring
+    const CIRC = 2 * Math.PI * R;
     bonosEl.innerHTML = bonoClients.map(c => {
-      const pct  = Math.min(100, ((c.sessionsLeft || 0) / (c.bonoSize || 10)) * 100);
-      const color = (c.sessionsLeft || 0) <= 2 ? 'var(--red)' : (c.sessionsLeft || 0) <= 4 ? 'var(--orange)' : 'var(--green)';
-      return `<div class="bono-card" onclick="openClientDetail('${c.id}')">
-        <div class="bono-avatar" style="background:${avatarColor(c.name)}">${c.name.charAt(0).toUpperCase()}</div>
-        <div class="bono-info">
-          <strong>${esc(c.name)}</strong>
-          <div class="bono-bar-wrap"><div class="bono-bar" style="width:${pct}%;background:${color}"></div></div>
-          <span class="bono-count">${c.sessionsLeft || 0} / ${c.bonoSize || 10} sesiones</span>
+      const left    = c.sessionsLeft || 0;
+      const total   = c.bonoSize    || 10;
+      const pct     = Math.min(1, left / total);
+      const offset  = CIRC * (1 - pct);
+      const color   = left <= 2 ? 'var(--red)' : left <= 4 ? 'var(--orange)' : 'var(--green)';
+      const pctTxt  = Math.round(pct * 100);
+      const firstName = esc(c.name).split(' ')[0];
+      return `<div class="dash-ring-item" onclick="openClientDetail('${c.id}')">
+        <div style="position:relative;width:64px;height:64px">
+          <svg class="dash-ring-svg" width="64" height="64" viewBox="0 0 64 64">
+            <circle class="dash-ring-track" cx="32" cy="32" r="${R}"/>
+            <circle class="dash-ring-fill"
+              cx="32" cy="32" r="${R}"
+              stroke="${color}"
+              stroke-dasharray="${CIRC}"
+              stroke-dashoffset="${offset}"
+            />
+          </svg>
+          <div class="dash-ring-pct" style="color:${color}">${pctTxt}%</div>
         </div>
+        <span class="dash-ring-name">${firstName}</span>
+        <span class="dash-ring-sessions">${left}/${total}</span>
       </div>`;
     }).join('');
   }
