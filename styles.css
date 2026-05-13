@@ -436,10 +436,10 @@ select { -webkit-appearance: none; appearance: none; }
 /* ── Header row ── */
 .cal-header-row {
   display: grid;
-  grid-template-columns: 52px repeat(7, 1fr);
+  grid-template-columns: 52px repeat(7, 1fr); /* overridden inline by JS */
   border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 10;
-  background: var(--bg3); min-width: 580px;
+  background: var(--bg3); min-width: 480px;
 }
 .cal-corner { padding: 10px 6px; }
 .cal-day-header {
@@ -455,14 +455,14 @@ select { -webkit-appearance: none; appearance: none; }
 /* ── Body: time column + day columns ── */
 .cal-body {
   display: grid;
-  grid-template-columns: 52px repeat(7, 1fr);
-  min-width: 580px;
+  grid-template-columns: 52px repeat(7, 1fr); /* overridden inline by JS */
+  min-width: 480px;
 }
 
 /* Time gutter */
 .cal-time-col { display: flex; flex-direction: column; }
 .cal-time {
-  height: 52px; padding: 0 6px;
+  height: 40px; padding: 0 6px;
   display: flex; align-items: flex-start; justify-content: flex-end;
   font-size: 10px; font-family: 'JetBrains Mono', monospace;
   color: var(--text3); padding-top: 4px;
@@ -480,7 +480,7 @@ select { -webkit-appearance: none; appearance: none; }
 
 /* Hour grid lines inside each day column */
 .cal-hour-slot {
-  height: 52px;
+  height: 40px;
   border-bottom: 1px solid var(--border);
   position: relative;
   pointer-events: none; /* let clicks pass through to col */
@@ -558,6 +558,17 @@ select { -webkit-appearance: none; appearance: none; }
 .ld-scheduled { background: rgba(71,184,255,.22);  border-left-color: var(--accent2); }
 .ld-completed { background: rgba(71,184,255,.08); opacity:.4; border-left-color: var(--accent2); }
 .ld-pending   { background: rgba(245,158,11,.2);  border-left-color: var(--orange); }
+
+/* ── Weekend toggle row ── */
+.weekend-toggle-row {
+  display: flex; justify-content: center;
+  margin-top: 8px;
+}
+.weekend-btn {
+  font-size: 11px; padding: 5px 14px;
+  opacity: .7; transition: opacity .15s;
+}
+.weekend-btn:hover { opacity: 1; }
 .ld-cancelled { background: rgba(100,100,100,.08); border-left-color: rgba(150,150,150,.4); }
 
 /* ── Day picker for recurring ── */
@@ -834,7 +845,7 @@ select { -webkit-appearance: none; appearance: none; }
   .toolbar { flex-direction: column; align-items: stretch; }
   .filter-tabs { overflow-x: auto; flex-wrap: nowrap; }
   .week-label { min-width: 110px; font-size: 12px; }
-  .calendar-grid { min-width: 480px; }
+  .calendar-grid { min-width: 360px; }
   .cal-legend { gap: 10px; font-size: 10px; }
   .page-header--hero h1 { font-size: 28px; }
 }
@@ -1723,6 +1734,25 @@ select { -webkit-appearance: none; appearance: none; }
   flex-direction: column;
   gap: 8px;
   animation: fadeInUp .18s ease both;
+}
+
+/* ── Notif config collapsible trigger ── */
+.notif-config-trigger {
+  display: flex; align-items: center; justify-content: space-between;
+  width: calc(100% - 20px); margin: 0 10px 2px;
+  background: none; border: none;
+  padding: 5px 8px; border-radius: 7px;
+  cursor: pointer; transition: background .15s;
+  font-family: 'Syne', sans-serif;
+}
+.notif-config-trigger:hover { background: var(--bg3); }
+.notif-config-trigger-label {
+  font-size: 11px; font-weight: 700;
+  color: var(--text3); letter-spacing: .2px;
+}
+.notif-config-trigger-arrow {
+  font-size: 11px; color: var(--text3);
+  transition: transform .15s;
 }
 .notif-config-row {
   display: flex;

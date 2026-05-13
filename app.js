@@ -115,6 +115,14 @@ window.toggleNotifications = function () {
   scheduleSessionNotifications();
 };
 
+window.toggleNotifConfig = function () {
+  const panel = document.getElementById('notif-config-panel');
+  const arrow = document.getElementById('notif-config-arrow');
+  const open  = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'flex';
+  if (arrow) arrow.textContent = open ? '▸' : '▾';
+};
+
 // Sincronizar UI al cargar
 document.addEventListener('DOMContentLoaded', _updateNotifUI);
 document.addEventListener('DOMContentLoaded', loadNotifConfig);
@@ -853,6 +861,7 @@ window.closeModalClient = function (e) {
 //  CALENDARIO
 // ═══════════════════════════════════════════════════════════
 const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 7–20
+let showWeekend = false; // sábado y domingo ocultos por defecto
 
 window.changeWeek = function (dir) {
   currentWeek = new Date(currentWeek);
@@ -862,6 +871,11 @@ window.changeWeek = function (dir) {
 
 window.goToday = function () {
   currentWeek = new Date();
+  renderCalendario();
+};
+
+window.toggleWeekend = function () {
+  showWeekend = !showWeekend;
   renderCalendario();
 };
 
@@ -875,8 +889,9 @@ function getWeekStart(d) {
 }
 
 
-// ── px per minute constant (52px per hour) ───────────────
-const PX_PER_MIN = 52 / 60;
+// ── px per minute constant (40px per hour) ───────────────
+const PX_PER_MIN = 40 / 60;
+const PX_PER_HOUR = 40;
 const CAL_START_H = 7; // first visible hour
 
 function minutesToPx(minutes) { return minutes * PX_PER_MIN; }
@@ -890,25 +905,34 @@ function renderCalendario() {
   if (!dataLoaded.clients || !dataLoaded.slots) return;
 
   const weekStart = getWeekStart(currentWeek);
-  const days = Array.from({ length: 7 }, (_, i) => {
+  const allDays = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart);
     d.setDate(d.getDate() + i);
     return d;
   });
 
+  // Sábado (idx 5) y domingo (idx 6) se ocultan si showWeekend=false
+  const days = showWeekend ? allDays : allDays.slice(0, 5);
+  const numDays = days.length;
+
+  // Update weekend toggle button label
+  const wkBtn = document.getElementById('toggle-weekend-btn');
+  if (wkBtn) wkBtn.textContent = showWeekend ? '← Ocultar fin de semana' : 'Ver fin de semana →';
+
   const opts = { day:'numeric', month:'short' };
   $('week-label').textContent =
-    `${days[0].toLocaleDateString('es-ES', opts)} – ${days[6].toLocaleDateString('es-ES', { ...opts, year:'numeric' })}`;
+    `${days[0].toLocaleDateString('es-ES', opts)} – ${days[numDays-1].toLocaleDateString('es-ES', { ...opts, year:'numeric' })}`;
 
   const today = new Date(); today.setHours(0,0,0,0);
   const DAYS_ES = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
   const calendarEl = $('calendar-grid');
-  const totalHours = HOURS.length; // 14 hours (7-20)
-  const colHeight  = totalHours * 52; // px
+  const totalHours = HOURS.length;
+  const colHeight  = totalHours * PX_PER_HOUR;
 
   // ── Build HTML ────────────────────────────────────────
+  const gridCols = `52px repeat(${numDays}, 1fr)`;
   // Header row
-  let html = `<div class="cal-header-row">
+  let html = `<div class="cal-header-row" style="grid-template-columns:${gridCols}">
     <div class="cal-corner"></div>`;
   days.forEach((d, i) => {
     const isT = d.getTime() === today.getTime();
@@ -920,7 +944,7 @@ function renderCalendario() {
   html += `</div>`;
 
   // Body
-  html += `<div class="cal-body">`;
+  html += `<div class="cal-body" style="grid-template-columns:${gridCols}">`;
 
   // Time gutter
   html += `<div class="cal-time-col">`;
@@ -1032,8 +1056,8 @@ function renderCalendario() {
   });
 
   // ── Week summary ─────────────────────────────────────
-  const weekEnd   = new Date(days[6]); weekEnd.setHours(23,59,59,999);
-  const weekBeg   = new Date(days[0]); weekBeg.setHours(0,0,0,0);
+  const weekEnd   = new Date(allDays[6]); weekEnd.setHours(23,59,59,999);
+  const weekBeg   = new Date(allDays[0]); weekBeg.setHours(0,0,0,0);
   const weekSlots = slots.filter(s => { const d = toDate(s.date); return d >= weekBeg && d <= weekEnd; });
   const countByStatus = { scheduled:0, completed:0, pending:0, cancelled:0 };
   weekSlots.forEach(s => { const st = s.status || 'scheduled'; if (st in countByStatus) countByStatus[st]++; });

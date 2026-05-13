@@ -100,8 +100,12 @@
         </span>
       </button>
 
-      <!-- ── Notificaciones config panel ── -->
-      <div class="notif-config-panel" id="notif-config-panel">
+      <!-- ── Notificaciones config collapsible ── -->
+      <button class="notif-config-trigger" id="notif-config-trigger" onclick="toggleNotifConfig()" aria-label="Configuración de notificaciones">
+        <span class="notif-config-trigger-label">⚙️ Configuración</span>
+        <span class="notif-config-trigger-arrow" id="notif-config-arrow">▸</span>
+      </button>
+      <div class="notif-config-panel" id="notif-config-panel" style="display:none">
         <div class="notif-config-row">
           <span class="notif-config-label">⏰ Avisar antes de sesión</span>
           <select class="notif-config-select" id="notif-minutes" onchange="saveNotifConfig()">
@@ -224,6 +228,10 @@
       </div>
       <div class="calendar-wrapper" style="margin-top:24px">
         <div id="calendar-grid" class="calendar-grid"></div>
+      </div>
+      <!-- Weekend toggle -->
+      <div class="weekend-toggle-row">
+        <button id="toggle-weekend-btn" class="btn btn-sm btn-outline weekend-btn" onclick="toggleWeekend()">Ver fin de semana →</button>
       </div>
       <!-- Legend -->
       <div class="cal-legend">
