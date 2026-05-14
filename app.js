@@ -752,57 +752,182 @@ window.setClientFilter = function (f) {
   renderClientes();
 };
 
+let clientView = 'grid'; // 'grid' | 'list'
+
+window.setClientView = function (v) {
+  clientView = v;
+  $('btn-view-grid').classList.toggle('active', v === 'grid');
+  $('btn-view-list').classList.toggle('active', v === 'list');
+  const grid = $('clients-grid');
+  grid.classList.toggle('clients-list-view', v === 'list');
+  renderClientes();
+};
+
 window.renderClientes = function () {
   if (!dataLoaded.clients) return;
-  const search = (val('client-search') || '').toLowerCase();
+  const search  = (val('client-search') || '').toLowerCase();
+  const sortBy  = ($('client-sort') || {}).value || 'name';
+  const bonoThr = parseInt(localStorage.getItem('notif-bono-threshold') || '2', 10);
+  const now     = new Date();
+
+  // ── Filter ──────────────────────────────────────────────
   let list = clients.filter(c => {
     const match = c.name.toLowerCase().includes(search) ||
       (c.phone || '').includes(search) ||
       (c.email || '').toLowerCase().includes(search);
     if (clientFilter === 'active') return match && c.active;
-    if (clientFilter === 'alert')  return match && c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= parseInt(localStorage.getItem('notif-bono-threshold') || '2', 10);
+    if (clientFilter === 'alert')  return match && c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= bonoThr;
     return match;
   });
 
-  const now = new Date();
+  // ── Sort ─────────────────────────────────────────────────
+  list = list.slice().sort((a, b) => {
+    if (sortBy === 'name') return a.name.localeCompare(b.name, 'es');
+    if (sortBy === 'next') {
+      const nextOf = c => slots.filter(s => s.clientId === c.id && toDate(s.date) >= now && s.status !== 'cancelled').sort((x,y) => toDate(x.date)-toDate(y.date))[0];
+      const na = nextOf(a), nb = nextOf(b);
+      if (!na && !nb) return a.name.localeCompare(b.name, 'es');
+      if (!na) return 1; if (!nb) return -1;
+      return toDate(na.date) - toDate(nb.date);
+    }
+    if (sortBy === 'alert') {
+      const alertScore = c => {
+        if (c.paymentType !== 'bono') return 999;
+        const left = c.sessionsLeft || 0;
+        if (left < 0) return -1;   // deuda
+        if (left === 0) return 0;
+        if (left <= bonoThr) return left;
+        return 100 + left;
+      };
+      return alertScore(a) - alertScore(b);
+    }
+    if (sortBy === 'inactive') {
+      const lastOf = c => slots.filter(s => s.clientId === c.id && s.status === 'completed').sort((x,y) => toDate(y.date)-toDate(x.date))[0];
+      const la = lastOf(a), lb = lastOf(b);
+      if (!la && !lb) return a.name.localeCompare(b.name, 'es');
+      if (!la) return -1; if (!lb) return 1;
+      return toDate(la.date) - toDate(lb.date);
+    }
+    return 0;
+  });
+
+  // ── Meta counter ─────────────────────────────────────────
+  const metaEl = $('clients-meta');
+  if (metaEl) {
+    const active  = list.filter(c => c.active).length;
+    const alerts  = list.filter(c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= bonoThr).length;
+    const debt    = list.filter(c => c.paymentType === 'bono' && (c.sessionsLeft || 0) < 0).length;
+    let metaHtml  = `<span>${list.length} cliente${list.length !== 1 ? 's' : ''}</span>`;
+    if (active < list.length) metaHtml += `<span class="meta-dot">·</span><span>${active} activos</span>`;
+    if (debt > 0)   metaHtml += `<span class="meta-dot">·</span><span class="meta-debt">⛔ ${debt} con deuda</span>`;
+    else if (alerts > 0) metaHtml += `<span class="meta-dot">·</span><span class="meta-alert">⚠️ ${alerts} en alerta</span>`;
+    metaEl.innerHTML = metaHtml;
+  }
+
   const el = $('clients-grid');
+  el.classList.toggle('clients-list-view', clientView === 'list');
+
   if (list.length === 0) {
     el.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><span>👥</span><p>No hay clientes todavía</p><button class="btn btn-primary btn-sm" onclick="openClientModal()">+ Añadir primer cliente</button></div>`;
     return;
   }
-  el.innerHTML = list.map(c => {
-    const statusTag = c.active
-      ? `<span class="tag tag-active">Activo</span>`
-      : `<span class="tag tag-inactive">Inactivo</span>`;
-    const payTag = `<span class="tag tag-${c.paymentType || 'bono'}">${payLabel(c.paymentType)}</span>`;
-    let bonoTag = '';
-    if (c.paymentType === 'bono') {
-      const level = (c.sessionsLeft || 0) <= 2 ? 'danger' : (c.sessionsLeft || 0) <= 4 ? 'warning' : 'ok';
-      bonoTag = `<span class="tag tag-${level}">${c.sessionsLeft || 0} ses.</span>`;
-    }
-    // Inactivity indicator
-    const lastSlot = slots.filter(s => s.clientId === c.id && s.status === 'completed').sort((a,b) => toDate(b.date)-toDate(a.date))[0];
-    const daysSince = lastSlot ? Math.floor((now - toDate(lastSlot.date)) / 86400000) : null;
-    const inactiveTag = daysSince !== null && daysSince > 14
-      ? `<span class="tag tag-inactive" title="${daysSince} días sin sesión">⚠️ Inactivo</span>` : '';
 
-    // Next session
-    const nextSl = slots.filter(s => s.clientId === c.id && toDate(s.date) >= now && s.status !== 'cancelled').sort((a,b) => toDate(a.date)-toDate(b.date))[0];
-    const nextTag = nextSl
-      ? `<span class="client-next-session">📅 ${toDate(nextSl.date).toLocaleDateString('es-ES',{weekday:'short',day:'numeric',month:'short'})}</span>` : '';
+  // ── Separate active / inactive ────────────────────────────
+  const activeList   = list.filter(c => c.active);
+  const inactiveList = list.filter(c => !c.active);
 
-    const color = avatarColor(c.name);
+  function buildCard(c) {
+    const color    = avatarColor(c.name);
     const initials = c.name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
-    return `<div class="client-card" onclick="openClientDetail('${c.id}')">
+
+    // ── Stats ────────────────────────────────────────────
+    const completedSlots = slots.filter(s => s.clientId === c.id && s.status === 'completed');
+    const totalSessions  = completedSlots.length;
+    const totalRevenue   = payments.filter(p => p.clientId === c.id).reduce((s, p) => s + (p.amount || 0), 0);
+
+    // ── Inactivity ───────────────────────────────────────
+    const lastSlot  = completedSlots.sort((a,b) => toDate(b.date)-toDate(a.date))[0];
+    const daysSince = lastSlot ? Math.floor((now - toDate(lastSlot.date)) / 86400000) : null;
+    const isInactive = daysSince !== null && daysSince > 14;
+
+    // ── Next session ─────────────────────────────────────
+    const nextSl = slots.filter(s => s.clientId === c.id && toDate(s.date) >= now && s.status !== 'cancelled').sort((a,b) => toDate(a.date)-toDate(b.date))[0];
+    const nextStr = nextSl ? toDate(nextSl.date).toLocaleDateString('es-ES',{weekday:'short',day:'numeric',month:'short'}) : null;
+
+    // ── Bono logic ───────────────────────────────────────
+    let bonoHtml = '';
+    if (c.paymentType === 'bono') {
+      const left    = c.sessionsLeft || 0;
+      const size    = c.bonoSize    || 10;
+      const isDebt  = left < 0;   // sesiones hechas sin renovar
+
+      // Color scheme
+      let barColor, badgeClass, badgeLabel;
+      if (isDebt) {
+        barColor   = 'var(--red)';
+        badgeClass = 'bono-badge-debt';
+        badgeLabel = `⛔ ${Math.abs(left)} pendiente${Math.abs(left)>1?'s':''} de renovar`;
+      } else if (left === 0) {
+        barColor   = 'var(--red)';
+        badgeClass = 'bono-badge-empty';
+        badgeLabel = '🔴 Bono agotado · Renovar';
+      } else if (left <= bonoThr) {
+        barColor   = 'var(--orange)';
+        badgeClass = 'bono-badge-low';
+        badgeLabel = `⚠️ ${left} ses. restante${left > 1 ? 's' : ''}`;
+      } else {
+        barColor   = 'var(--green)';
+        badgeClass = 'bono-badge-ok';
+        badgeLabel = `✅ ${left} ses. restantes`;
+      }
+
+      // Progress bar: if debt, show full red bar; else pct consumed
+      const pct = isDebt ? 100 : Math.max(0, Math.round((left / size) * 100));
+
+      bonoHtml = `
+        <div class="card-bono-wrap">
+          <div class="card-bono-bar-bg">
+            <div class="card-bono-bar" style="width:${pct}%;background:${barColor}"></div>
+          </div>
+          <span class="card-bono-badge ${badgeClass}">${badgeLabel}</span>
+        </div>`;
+    }
+
+    // ── Tags row ─────────────────────────────────────────
+    const statusTag   = c.active ? `<span class="tag tag-active">Activo</span>` : `<span class="tag tag-inactive">Inactivo</span>`;
+    const payTag      = `<span class="tag tag-${c.paymentType || 'bono'}">${payLabel(c.paymentType)}</span>`;
+    const inactiveTag = isInactive ? `<span class="tag tag-inactive" title="${daysSince} días sin sesión">💤 ${daysSince}d sin sesión</span>` : '';
+
+    // ── Stats row ─────────────────────────────────────────
+    const statsHtml = `<div class="card-stats-row">
+      <span class="card-stat">🏋️ ${totalSessions} ses.</span>
+      <span class="card-stat">💶 ${totalRevenue.toLocaleString('es-ES')} €</span>
+      ${nextStr ? `<span class="card-stat">📅 ${nextStr}</span>` : ''}
+    </div>`;
+
+    return `<div class="client-card${!c.active ? ' client-card--inactive' : ''}" onclick="openClientDetail('${c.id}')">
       <div class="client-avatar" style="background:${color}">${initials}</div>
       <div class="client-info">
-        <h3>${esc(c.name)}</h3>
+        <div class="client-card-top">
+          <h3>${esc(c.name)}</h3>
+          <button class="card-edit-btn" onclick="event.stopPropagation();openClientModal('${c.id}')" title="Editar">✏️</button>
+        </div>
         <p>${esc(c.phone || c.email || '—')}</p>
-        <div class="client-tags">${statusTag}${payTag}${bonoTag}${inactiveTag}</div>
-        ${nextTag}
+        <div class="client-tags">${statusTag}${payTag}${inactiveTag}</div>
+        ${bonoHtml}
+        ${statsHtml}
       </div>
     </div>`;
-  }).join('');
+  }
+
+  let html = activeList.map(buildCard).join('');
+  if (inactiveList.length > 0) {
+    html += `<div class="clients-section-divider" style="grid-column:1/-1">
+      <span>Inactivos (${inactiveList.length})</span>
+    </div>`;
+    html += inactiveList.map(buildCard).join('');
+  }
+  el.innerHTML = html;
 };
 
 // ── Client Modal ──────────────────────────────────────────

@@ -188,7 +188,18 @@
           <button class="filter-tab" data-filter="active" onclick="setClientFilter('active')">Activos</button>
           <button class="filter-tab" data-filter="alert" onclick="setClientFilter('alert')">⚠️ Alertas</button>
         </div>
+        <select id="client-sort" class="sort-select" onchange="renderClientes()">
+          <option value="name">A–Z</option>
+          <option value="next">Próxima sesión</option>
+          <option value="alert">Alertas primero</option>
+          <option value="inactive">Inactivos primero</option>
+        </select>
+        <div class="view-toggle">
+          <button id="btn-view-grid" class="view-btn active" title="Vista grid" onclick="setClientView('grid')">⊞</button>
+          <button id="btn-view-list" class="view-btn" title="Vista lista" onclick="setClientView('list')">☰</button>
+        </div>
       </div>
+      <div id="clients-meta" class="clients-meta"></div>
       <div id="clients-grid" class="clients-grid"></div>
     </div>
 
