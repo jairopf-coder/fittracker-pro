@@ -1834,3 +1834,209 @@ select { -webkit-appearance: none; appearance: none; }
   border-color: rgba(245,158,11,.25);
   color: var(--orange);
 }
+
+/* ═══════════════════════════════════════════════════════════
+   FITTRACKER v4 — NEW STYLES
+═══════════════════════════════════════════════════════════ */
+
+/* ── Keyboard shortcuts hint ── */
+.sidebar-shortcuts-hint {
+  padding: 8px 16px;
+  font-size: 11px;
+  color: var(--text3, rgba(122,131,148,0.5));
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.sidebar-shortcuts-hint kbd {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ── Series info badge (modal slot) ── */
+.series-info-badge {
+  font-size: 11px;
+  background: rgba(232,255,71,0.12);
+  color: var(--accent, #e8ff47);
+  border: 1px solid rgba(232,255,71,0.25);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ── Quick complete button on calendar events ── */
+.ev-quick-complete {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0,0,0,0.35);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  font-size: 11px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+  z-index: 2;
+}
+.cal-event:hover .ev-quick-complete { display: flex; }
+.ev-quick-complete:hover { background: var(--green, #4caf50); }
+
+/* ── Repeat badge on calendar events ── */
+.ev-repeat-badge {
+  font-size: 9px;
+  opacity: 0.8;
+  margin-left: 3px;
+}
+
+/* ── Day occupancy bar in calendar header ── */
+.cal-day-occ-bar {
+  height: 3px;
+  background: var(--bg3);
+  border-radius: 2px;
+  margin-top: 3px;
+  overflow: hidden;
+}
+.cal-day-occ-fill {
+  height: 100%;
+  background: var(--accent, #e8ff47);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* ── Recurring action modal ── */
+.modal--compact {
+  max-width: 420px;
+}
+.recur-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.recur-option-btn {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  background: var(--bg2);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  text-align: left;
+  color: var(--text1);
+}
+.recur-option-btn:hover {
+  border-color: var(--accent, #e8ff47);
+  background: rgba(232,255,71,0.06);
+}
+.recur-opt-icon { font-size: 20px; flex-shrink: 0; }
+.recur-opt-title { font-weight: 700; font-size: 14px; margin-bottom: 2px; }
+.recur-opt-desc  { font-size: 12px; color: var(--text2); }
+
+/* ── Quick complete button in dashboard timeline ── */
+.dash-tl-complete-btn {
+  margin-left: auto;
+  background: rgba(76,175,80,0.15);
+  color: var(--green, #4caf50);
+  border: 1px solid rgba(76,175,80,0.3);
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.dash-tl-complete-btn:hover {
+  background: rgba(76,175,80,0.35);
+}
+
+/* ── Client card next session ── */
+.client-next-session {
+  display: block;
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 4px;
+}
+
+/* ── Client detail attendance row ── */
+.detail-attendance-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin: 16px 0 24px;
+}
+.detail-att-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  text-align: center;
+}
+.detail-att-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text1);
+  line-height: 1;
+}
+.detail-att-label {
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 4px;
+}
+@media (max-width: 480px) {
+  .detail-attendance-row { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Client detail inactivity alert ── */
+.detail-inactive-alert {
+  background: rgba(255,107,107,0.1);
+  border: 1px solid rgba(255,107,107,0.3);
+  color: var(--red, #ff6b6b);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+/* ── Next session card in client detail ── */
+.detail-next-session {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(232,255,71,0.07);
+  border: 1px solid rgba(232,255,71,0.2);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+.detail-next-icon { font-size: 22px; }
+.detail-next-label { font-size: 11px; color: var(--text2); margin-bottom: 2px; }
+.detail-next-date  { font-size: 14px; font-weight: 700; color: var(--text1); }
+
+/* ── Tooltip repeat indicator ── */
+.tt-repeat { font-size: 11px; }
+
+/* ── Cal event position: relative for quick-complete button ── */
+.cal-event { position: absolute; }
+
+/* ── Number input for repeat count ── */
+#s-repeat-count {
+  width: 100%;
+  max-width: 140px;
+}

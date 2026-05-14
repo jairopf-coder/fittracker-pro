@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════
-//  FITTRACKER PRO  — app.js  v2
+//  FITTRACKER PRO  — app.js  v4
 // ═══════════════════════════════════════════════════════════
 
 import { initializeApp }          from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
@@ -11,7 +11,7 @@ import { getFirestore, collection, doc,
                                    from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
 // ─── Init Firebase ───────────────────────────────────────
-const app = initializeApp(firebaseConfig);   // firebaseConfig viene de firebase-config.js
+const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db   = getFirestore(app);
 
@@ -27,9 +27,11 @@ let editingClient  = null;
 let editingSlot    = null;
 let editingPayment = null;
 
+// Track unsaved changes in modal
+let slotModalDirty = false;
+
 const unsubs = {};
 
-// ─── Data-loaded flags (para skeleton loaders) ───────────
 const dataLoaded = { clients: false, slots: false, payments: false };
 
 // ─── Theme ───────────────────────────────────────────────
@@ -63,25 +65,58 @@ function _updateThemeUI() {
   if (icon)  icon.textContent  = isLight ? '🌙' : '☀️';
   if (label) label.textContent = isLight ? 'Modo oscuro' : 'Modo claro';
 }
-// Run once on load to sync icon
 document.addEventListener('DOMContentLoaded', _updateThemeUI);
 
 // ═══════════════════════════════════════════════════════════
-//  NOTIFICACIONES — toggle UI
+//  KEYBOARD SHORTCUTS
 // ═══════════════════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  // Cmd/Ctrl+K → búsqueda global
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    const overlay = document.getElementById('search-overlay');
+    const isOpen  = overlay && !overlay.classList.contains('hidden');
+    isOpen ? _dismissSearch() : openSearch();
+    return;
+  }
 
-// Actualiza el aspecto visual del toggle según el estado actual
+  // N → nueva sesión (cuando no hay modal abierto y no se está escribiendo)
+  if (e.key === 'n' && !e.metaKey && !e.ctrlKey) {
+    const activeTag = document.activeElement?.tagName;
+    if (['INPUT','TEXTAREA','SELECT'].includes(activeTag)) return;
+    const anyModal = document.querySelector('.modal-overlay:not(.hidden)');
+    if (anyModal) return;
+    if (currentPage === 'calendario') { openSlotModal(null, null, toDateInput(new Date()), 9, 0); }
+    return;
+  }
+
+  // Escape → cerrar modales / búsqueda
+  if (e.key === 'Escape') {
+    const search = document.getElementById('search-overlay');
+    if (search && !search.classList.contains('hidden')) { _dismissSearch(); return; }
+    // Close topmost open modal
+    const modals = ['modal-slot','modal-client','modal-payment','modal-notif-help','modal-recur-action'];
+    for (const id of modals) {
+      const el = document.getElementById(id);
+      if (el && !el.classList.contains('hidden')) {
+        el.querySelector('.close-btn')?.click();
+        return;
+      }
+    }
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  NOTIFICACIONES
+// ═══════════════════════════════════════════════════════════
 function _updateNotifUI() {
   const btn   = document.getElementById('notif-toggle-btn');
   const icon  = document.getElementById('notif-icon');
   const track = document.getElementById('notif-track');
   if (!btn || !track) return;
-
   const permission = 'Notification' in window ? Notification.permission : 'denied';
   const enabled    = localStorage.getItem('notif-enabled') !== '0';
-
   if (permission === 'denied') {
-    // Permiso denegado a nivel navegador: icono tachado, tooltip, track rojo
     if (icon) icon.textContent = '🔕';
     btn.setAttribute('data-denied', 'true');
     btn.setAttribute('data-tooltip', 'Actívalas en tu navegador');
@@ -92,26 +127,17 @@ function _updateNotifUI() {
     btn.removeAttribute('data-denied');
     btn.removeAttribute('data-tooltip');
     track.classList.remove('notif-denied');
-    if (enabled) {
-      track.classList.add('notif-on');
-    } else {
-      track.classList.remove('notif-on');
-    }
+    if (enabled) { track.classList.add('notif-on'); }
+    else { track.classList.remove('notif-on'); }
   }
 }
 
-// Llamada desde onclick del botón
 window.toggleNotifications = function () {
   const permission = 'Notification' in window ? Notification.permission : 'denied';
-  // Si el permiso está denegado a nivel navegador, no hacer nada
-  // (el tooltip ya informa al usuario)
   if (permission === 'denied') return;
-
   const current = localStorage.getItem('notif-enabled') !== '0';
   localStorage.setItem('notif-enabled', current ? '0' : '1');
   _updateNotifUI();
-
-  // Reprogramar (o cancelar) según el nuevo estado
   scheduleSessionNotifications();
 };
 
@@ -123,15 +149,9 @@ window.toggleNotifConfig = function () {
   if (arrow) arrow.textContent = open ? '▸' : '▾';
 };
 
-// Sincronizar UI al cargar
 document.addEventListener('DOMContentLoaded', _updateNotifUI);
 document.addEventListener('DOMContentLoaded', loadNotifConfig);
-// ═══════════════════════════════════════════════════════════
-//  SERVICE WORKER — registro
-//  Se registra sw.js en cuanto el DOM esté listo.
-//  El SW vive en la raíz del proyecto para tener alcance
-//  sobre toda la app.
-// ═══════════════════════════════════════════════════════════
+
 document.addEventListener('DOMContentLoaded', () => {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js')
@@ -148,17 +168,9 @@ onAuthStateChanged(auth, user => {
     show('app'); hide('page-login');
     startListeners();
     navigate('dashboard');
-
-    // ── Pedir permiso de notificaciones (solo la primera vez) ──
-    // Se guarda en localStorage 'notif-asked' para no molestar
-    // al usuario más de una vez.
     if ('Notification' in window && !localStorage.getItem('notif-asked')) {
       localStorage.setItem('notif-asked', '1');
-      Notification.requestPermission().then(perm => {
-        console.log('[Notif] permiso:', perm);
-        // Actualizar el icono del toggle según la respuesta del usuario
-        _updateNotifUI();
-      });
+      Notification.requestPermission().then(() => _updateNotifUI());
     }
   } else {
     hide('app'); show('page-login');
@@ -177,9 +189,7 @@ window.doLogin = async function () {
   }
 };
 
-window.doLogout = async function () {
-  await signOut(auth);
-};
+window.doLogout = async function () { await signOut(auth); };
 
 document.getElementById('login-password').addEventListener('keydown', e => {
   if (e.key === 'Enter') doLogin();
@@ -189,57 +199,36 @@ document.getElementById('login-password').addEventListener('keydown', e => {
 //  FIRESTORE LISTENERS
 // ═══════════════════════════════════════════════════════════
 function startListeners() {
-  // Mostrar skeletons antes del primer snapshot
   showSkeletons();
-
   unsubs.clients = onSnapshot(
     query(collection(db, 'clients'), orderBy('name')),
-    snap => {
-      clients = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      dataLoaded.clients = true;
-      refreshAll();
-    }
+    snap => { clients = snap.docs.map(d => ({ id: d.id, ...d.data() })); dataLoaded.clients = true; refreshAll(); }
   );
   unsubs.slots = onSnapshot(
     query(collection(db, 'slots'), orderBy('date')),
-    snap => {
-      slots = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      dataLoaded.slots = true;
-      refreshAll();
-    }
+    snap => { slots = snap.docs.map(d => ({ id: d.id, ...d.data() })); dataLoaded.slots = true; refreshAll(); }
   );
   unsubs.payments = onSnapshot(
     query(collection(db, 'payments'), orderBy('date', 'desc')),
-    snap => {
-      payments = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      dataLoaded.payments = true;
-      refreshAll();
-    }
+    snap => { payments = snap.docs.map(d => ({ id: d.id, ...d.data() })); dataLoaded.payments = true; refreshAll(); }
   );
 }
 
 function stopListeners() {
   Object.values(unsubs).forEach(u => u && u());
-  dataLoaded.clients = false;
-  dataLoaded.slots   = false;
-  dataLoaded.payments = false;
+  dataLoaded.clients = false; dataLoaded.slots = false; dataLoaded.payments = false;
 }
 
-// ─── Skeleton loaders ────────────────────────────────────
 function skeletonGrid(cls, count) {
   return Array(count).fill(`<div class="skeleton ${cls}"></div>`).join('');
 }
 
 function showSkeletons() {
-  // Dashboard
   $('dash-stats').innerHTML   = skeletonGrid('skeleton-stat', 4);
   $('dash-today').innerHTML   = skeletonGrid('skeleton-session', 3);
   $('dash-bonos').innerHTML   = skeletonGrid('skeleton-bono', 4);
-  // Clientes
   $('clients-grid').innerHTML = skeletonGrid('skeleton-client', 6);
-  // Calendario
   $('calendar-grid').innerHTML = skeletonGrid('skeleton-cal-row', 5);
-  // Pagos
   $('payments-list').innerHTML = skeletonGrid('skeleton-payment', 5);
   if ($('payments-summary')) $('payments-summary').innerHTML = skeletonGrid('skeleton-stat', 3);
 }
@@ -250,16 +239,12 @@ function refreshAll() {
   renderCalendario();
   renderPagos();
   updateBadges();
-
-  // ── Reprogramar notificaciones cada vez que cambian datos ──
   scheduleSessionNotifications();
 }
 
-// ── Notificaciones config ──────────────────────────────────
 function loadNotifConfig() {
   const minutes   = parseInt(localStorage.getItem('notif-minutes')        || '30', 10);
   const threshold = parseInt(localStorage.getItem('notif-bono-threshold') || '2',  10);
-
   const selMin = document.getElementById('notif-minutes');
   const selThr = document.getElementById('notif-bono-threshold');
   if (selMin) selMin.value = String(minutes);
@@ -271,7 +256,6 @@ window.saveNotifConfig = function () {
   const selThr = document.getElementById('notif-bono-threshold');
   if (selMin) localStorage.setItem('notif-minutes',        selMin.value);
   if (selThr) localStorage.setItem('notif-bono-threshold', selThr.value);
-  // Reprogramar con nueva config
   scheduleSessionNotifications();
   showToast('Configuración guardada', 'success');
 };
@@ -288,76 +272,36 @@ window.closeNotifHelp = function (e) {
 
 // ═══════════════════════════════════════════════════════════
 //  NOTIFICACIONES LOCALES
-//  Usa el Service Worker (sw.js) para mostrar notificaciones
-//  sin servidor externo.
-//
-//  • 30 min antes de cada sesión del día (no canceladas)
-//  • Inmediata si algún cliente bono tiene ≤2 sesiones
 // ═══════════════════════════════════════════════════════════
 async function scheduleSessionNotifications() {
-  // Necesitamos permiso, toggle ON y SW activo
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   if (localStorage.getItem('notif-enabled') === '0') return;
   if (!('serviceWorker' in navigator)) return;
-
   const swReg = await navigator.serviceWorker.ready.catch(() => null);
   if (!swReg || !swReg.active) return;
-
-  // 1) Cancelar todas las notificaciones programadas anteriores
   swReg.active.postMessage({ type: 'CANCEL_ALL_NOTIFICATIONS' });
-
   const now = new Date();
-
-  // 2) Sesiones de hoy (excluye canceladas)
   const todaySlots = slots.filter(s => isToday(toDate(s.date)) && s.status !== 'cancelled');
-
   for (const slot of todaySlots) {
     const client = clients.find(c => c.id === slot.clientId);
     const clientName = client ? client.name : 'Cliente';
-
-    // Minutos antes configurados por el usuario (default 30)
     const minutesBefore = parseInt(localStorage.getItem('notif-minutes') || '30', 10);
-
-    // Construir la hora de la sesión (slot.time = "HH:MM")
     const [h, m] = (slot.time || '00:00').split(':').map(Number);
-    const sessionDate = new Date();
-    sessionDate.setHours(h, m, 0, 0);
-
-    // X minutos antes (según config)
+    const sessionDate = new Date(); sessionDate.setHours(h, m, 0, 0);
     const notifTime = new Date(sessionDate.getTime() - minutesBefore * 60 * 1000);
     const delay = notifTime.getTime() - now.getTime();
-
-    // Solo programar si la notificación es en el futuro
     if (delay > 0) {
       const tag = `session-${slot.id}`;
-      const timeLabel = slot.time || `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}`;
-      const minLabel  = minutesBefore >= 60
-        ? `${minutesBefore / 60}h`
-        : `${minutesBefore} min`;
-      swReg.active.postMessage({
-        type:  'SCHEDULE_NOTIFICATION',
-        delay,
-        title: `FitTracker · en ${minLabel}`,
-        body:  `${clientName} · ${timeLabel}`,
-        tag,
-      });
+      const timeLabel = slot.time || `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+      const minLabel  = minutesBefore >= 60 ? `${minutesBefore / 60}h` : `${minutesBefore} min`;
+      swReg.active.postMessage({ type: 'SCHEDULE_NOTIFICATION', delay, title: `FitTracker · en ${minLabel}`, body: `${clientName} · ${timeLabel}`, tag });
     }
   }
-
-  // 3) Notificaciones inmediatas por bonos bajos (según umbral configurado)
   const bonoThreshold = parseInt(localStorage.getItem('notif-bono-threshold') || '2', 10);
-  const lowBono = clients.filter(
-    c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= bonoThreshold
-  );
-
+  const lowBono = clients.filter(c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= bonoThreshold);
   for (const c of lowBono) {
     const left = c.sessionsLeft || 0;
-    swReg.active.postMessage({
-      type:  'SHOW_NOTIFICATION',
-      title: `Bono bajo: ${c.name}`,
-      body:  `Solo tiene ${left} sesión${left === 1 ? '' : 'es'} restante${left === 1 ? '' : 's'}`,
-      tag:   `bono-${c.id}`,
-    });
+    swReg.active.postMessage({ type: 'SHOW_NOTIFICATION', title: `Bono bajo: ${c.name}`, body: `Solo tiene ${left} sesión${left === 1 ? '' : 'es'} restante${left === 1 ? '' : 's'}`, tag: `bono-${c.id}` });
   }
 }
 
@@ -368,7 +312,6 @@ window.navigate = function (page) {
   const pages = ['dashboard','clientes','calendario','pagos','client-detail'];
   const prevPage = currentPage;
   const prevEl   = document.getElementById(`page-${prevPage}`);
-
   currentPage = page;
   const navPage = ['dashboard','clientes','calendario','pagos'].includes(page) ? page : null;
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
@@ -378,7 +321,6 @@ window.navigate = function (page) {
     el.classList.toggle('active', navPage ? el.dataset.page === navPage : false);
   });
   closeSidebar();
-
   const doSwitch = () => {
     pages.forEach(p => {
       const el = document.getElementById(`page-${p}`);
@@ -393,30 +335,32 @@ window.navigate = function (page) {
       }
     });
   };
-
   if (prevEl && !prevEl.classList.contains('hidden') && prevPage !== page) {
     prevEl.classList.add('page-fade-out');
     setTimeout(doSwitch, 75);
-  } else {
-    doSwitch();
-  }
+  } else { doSwitch(); }
 };
 
 window.toggleSidebar = function () {
-  const sb = $('sidebar');
-  const ov = $('sidebar-overlay');
-  sb.classList.toggle('open');
-  ov.classList.toggle('visible');
+  $('sidebar').classList.toggle('open');
+  $('sidebar-overlay').classList.toggle('visible');
 };
-
 window.closeSidebar = function () {
   $('sidebar').classList.remove('open');
   $('sidebar-overlay').classList.remove('visible');
 };
 
 // ═══════════════════════════════════════════════════════════
-//  UI HELPERS — avatar color, toast, detalle cliente
+//  UI HELPERS
 // ═══════════════════════════════════════════════════════════
+
+// Client color derived from name
+function clientColor(clientId) {
+  const client = clients.find(c => c.id === clientId);
+  if (!client) return null;
+  return avatarColor(client.name);
+}
+
 function avatarColor(name) {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
@@ -440,10 +384,12 @@ function showToast(msg, type = 'success') {
   }, 2600);
 }
 
+// ═══════════════════════════════════════════════════════════
+//  CLIENT DETAIL
+// ═══════════════════════════════════════════════════════════
 window.openClientDetail = function (id) {
   const c = clients.find(x => x.id === id);
   if (!c) return;
-
   const color = avatarColor(c.name);
   const initials = c.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
@@ -458,6 +404,47 @@ window.openClientDetail = function (id) {
     .slice(0, 5);
 
   const totalPaid = payments.filter(p => p.clientId === id).reduce((s, p) => s + (p.amount || 0), 0);
+
+  // ── Attendance stats ──────────────────────────────────
+  const allClientSlots = slots.filter(s => s.clientId === id);
+  const completed  = allClientSlots.filter(s => s.status === 'completed').length;
+  const cancelled  = allClientSlots.filter(s => s.status === 'cancelled').length;
+  const attendance = allClientSlots.length > 0
+    ? Math.round((completed / allClientSlots.length) * 100)
+    : 0;
+
+  // ── Streak ────────────────────────────────────────────
+  const recentCompleted = allClientSlots
+    .filter(s => s.status === 'completed')
+    .sort((a, b) => toDate(b.date) - toDate(a.date));
+  let streak = 0;
+  const now2 = new Date(); now2.setHours(0,0,0,0);
+  for (let i = 0; i < recentCompleted.length; i++) {
+    const d = toDate(recentCompleted[i].date);
+    d.setHours(0,0,0,0);
+    if (i === 0 && (now2 - d) > 14 * 86400000) break;
+    streak++;
+    if (i < recentCompleted.length - 1) {
+      const next = toDate(recentCompleted[i+1].date);
+      next.setHours(0,0,0,0);
+      if ((d - next) > 14 * 86400000) break;
+    }
+  }
+
+  // ── Next session ──────────────────────────────────────
+  const futureSlots = slots
+    .filter(s => s.clientId === id && toDate(s.date) >= new Date() && s.status !== 'cancelled')
+    .sort((a, b) => toDate(a.date) - toDate(b.date));
+  const nextSession = futureSlots[0];
+
+  // ── Inactivity alert ─────────────────────────────────
+  const lastSlot = allClientSlots
+    .filter(s => s.status === 'completed')
+    .sort((a, b) => toDate(b.date) - toDate(a.date))[0];
+  const daysSinceLast = lastSlot
+    ? Math.floor((new Date() - toDate(lastSlot.date)) / 86400000)
+    : null;
+  const inactiveAlert = daysSinceLast !== null && daysSinceLast > 14;
 
   const statusTag = c.active
     ? `<span class="tag tag-active">Activo</span>`
@@ -476,6 +463,18 @@ window.openClientDetail = function (id) {
       <div class="detail-bono-label">${c.sessionsLeft || 0} de ${c.bonoSize || 10} sesiones restantes</div>
     </div>`;
   }
+
+  const nextHtml = nextSession
+    ? `<div class="detail-next-session">
+        <span class="detail-next-icon">📅</span>
+        <div>
+          <div class="detail-next-label">Próxima sesión</div>
+          <div class="detail-next-date">${toDate(nextSession.date).toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'})} · ${formatTime(toDate(nextSession.date))}</div>
+        </div>
+      </div>` : '';
+
+  const inactiveHtml = inactiveAlert
+    ? `<div class="detail-inactive-alert">⚠️ Sin sesiones completadas en ${daysSinceLast} días</div>` : '';
 
   const sessionsHtml = clientSlots.length === 0
     ? `<div class="detail-empty">Sin sesiones registradas</div>`
@@ -525,7 +524,28 @@ window.openClientDetail = function (id) {
       </div>
     </div>
 
+    ${inactiveHtml}
+    ${nextHtml}
     ${bonoHtml}
+
+    <div class="detail-attendance-row">
+      <div class="detail-att-card">
+        <div class="detail-att-value">${attendance}%</div>
+        <div class="detail-att-label">Asistencia</div>
+      </div>
+      <div class="detail-att-card">
+        <div class="detail-att-value">${completed}</div>
+        <div class="detail-att-label">Completadas</div>
+      </div>
+      <div class="detail-att-card">
+        <div class="detail-att-value">${cancelled}</div>
+        <div class="detail-att-label">Canceladas</div>
+      </div>
+      <div class="detail-att-card">
+        <div class="detail-att-value">${streak > 0 ? '🔥' + streak : '—'}</div>
+        <div class="detail-att-label">Racha</div>
+      </div>
+    </div>
 
     <div class="detail-grid">
       <div class="detail-section">
@@ -552,23 +572,18 @@ function renderDashboard() {
   const hour = now.getHours();
   const greeting = hour < 13 ? 'Buenos días' : hour < 20 ? 'Buenas tardes' : 'Buenas noches';
   const dateStr = now.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
-
   if ($('dash-greeting')) $('dash-greeting').textContent = greeting;
   if ($('dash-date'))     $('dash-date').textContent = dateStr;
 
   const activeClients = clients.filter(c => c.active);
   const totalRevenue  = payments.reduce((s, p) => s + (p.amount || 0), 0);
-
-  // Alerts: bonos con ≤N sesiones (según config)
   const bonoThr = parseInt(localStorage.getItem('notif-bono-threshold') || '2', 10);
   const alerts = clients.filter(c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= bonoThr);
   updateBadges(alerts.length);
 
-  // Hero: sesiones de hoy (excluye canceladas)
   const todaySlots = slots.filter(s => isToday(toDate(s.date)) && s.status !== 'cancelled');
   if ($('dash-hero-sessions')) $('dash-hero-sessions').textContent = todaySlots.length;
 
-  // Alert pill en hero
   const alertsEl = $('dash-alerts');
   if (alerts.length === 0) {
     alertsEl.innerHTML = '';
@@ -579,7 +594,6 @@ function renderDashboard() {
     </button>`;
   }
 
-  // Semana actual vs anterior
   const weekSlots = slots.filter(s => isThisWeek(toDate(s.date)) && s.status !== 'cancelled');
   const prevWeekStart = getWeekStart(new Date()); prevWeekStart.setDate(prevWeekStart.getDate() - 7);
   const prevWeekEnd   = new Date(prevWeekStart); prevWeekEnd.setDate(prevWeekEnd.getDate() + 6);
@@ -616,7 +630,6 @@ function renderDashboard() {
     </div>
   `;
 
-  // Timeline sesiones hoy
   const todayAll = slots.filter(s => isToday(toDate(s.date)));
   const todayEl = $('dash-today');
   if (todayAll.length === 0) {
@@ -629,36 +642,32 @@ function renderDashboard() {
         const client = clients.find(c => c.id === s.clientId);
         const name   = client ? client.name : (s.title || 'Bloqueado');
         const cls    = statusCls(s.status);
+        const canComplete = s.status !== 'completed' && s.status !== 'cancelled' && s.clientId;
         return `<div class="dash-tl-item">
           <span class="dash-tl-dot ${cls}"></span>
           <span class="dash-tl-time">${formatTime(toDate(s.date))}</span>
           <span class="dash-tl-name">${esc(name)}</span>
           <span class="dash-tl-status ${cls}">${statusTxt(s.status)}</span>
+          ${canComplete ? `<button class="dash-tl-complete-btn" onclick="quickCompleteSlot('${s.id}')" title="Completar sesión">✓</button>` : ''}
         </div>`;
       }).join('')}
     </div>`;
   }
 
   // Charts
-  // — Sesiones por día (últimos 7 días)
-  const sesLabels = [];
-  const sesCounts = [];
+  const sesLabels = [], sesCounts = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date(); d.setDate(d.getDate() - i); d.setHours(0,0,0,0);
     const next = new Date(d); next.setDate(d.getDate() + 1);
     sesLabels.push(d.toLocaleDateString('es-ES', { weekday: 'short' }));
     sesCounts.push(slots.filter(s => { const sd = toDate(s.date); return sd >= d && sd < next && s.status !== 'cancelled'; }).length);
   }
-
   if (window._chartSesiones) { window._chartSesiones.destroy(); window._chartSesiones = null; }
   const ctxSes = $('chart-sesiones');
   if (ctxSes) {
     window._chartSesiones = new Chart(ctxSes, {
       type: 'bar',
-      data: {
-        labels: sesLabels,
-        datasets: [{ data: sesCounts, backgroundColor: '#e8ff47', borderRadius: 6, borderSkipped: false }]
-      },
+      data: { labels: sesLabels, datasets: [{ data: sesCounts, backgroundColor: '#e8ff47', borderRadius: 6, borderSkipped: false }] },
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y} ses.` } } },
@@ -670,32 +679,18 @@ function renderDashboard() {
     });
   }
 
-  // — Ingresos por mes (últimos 6 meses)
-  const ingLabels = [];
-  const ingTotals = [];
+  const ingLabels = [], ingTotals = [];
   for (let i = 5; i >= 0; i--) {
     const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i);
     ingLabels.push(d.toLocaleDateString('es-ES', { month: 'short' }));
     ingTotals.push(payments.filter(p => { const pd = toDate(p.date); return pd.getFullYear() === d.getFullYear() && pd.getMonth() === d.getMonth(); }).reduce((s, p) => s + (p.amount || 0), 0));
   }
-
   if (window._chartIngresos) { window._chartIngresos.destroy(); window._chartIngresos = null; }
   const ctxIng = $('chart-ingresos');
   if (ctxIng) {
     window._chartIngresos = new Chart(ctxIng, {
       type: 'line',
-      data: {
-        labels: ingLabels,
-        datasets: [{
-          data: ingTotals,
-          borderColor: '#47b8ff',
-          borderWidth: 2,
-          tension: 0.4,
-          pointRadius: 0,
-          fill: true,
-          backgroundColor: 'rgba(71,184,255,0.10)'
-        }]
-      },
+      data: { labels: ingLabels, datasets: [{ data: ingTotals, borderColor: '#47b8ff', borderWidth: 2, tension: 0.4, pointRadius: 0, fill: true, backgroundColor: 'rgba(71,184,255,0.10)' }] },
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.y.toFixed(0)}€` } } },
@@ -707,32 +702,22 @@ function renderDashboard() {
     });
   }
 
-  // Bono rings SVG
   const bonosEl = $('dash-bonos');
   const bonoClients = activeClients.filter(c => c.paymentType === 'bono').slice(0, 6);
   if (bonoClients.length === 0) {
     bonosEl.innerHTML = `<p class="dash-empty">Sin clientes con bono activo</p>`;
   } else {
-    const R = 26; // radio del ring
-    const CIRC = 2 * Math.PI * R;
+    const R = 26; const CIRC = 2 * Math.PI * R;
     bonosEl.innerHTML = bonoClients.map(c => {
-      const left    = c.sessionsLeft || 0;
-      const total   = c.bonoSize    || 10;
-      const pct     = Math.min(1, left / total);
-      const offset  = CIRC * (1 - pct);
-      const color   = left <= 2 ? 'var(--red)' : left <= 4 ? 'var(--orange)' : 'var(--green)';
-      const pctTxt  = Math.round(pct * 100);
-      const firstName = esc(c.name).split(' ')[0];
+      const left = c.sessionsLeft || 0; const total = c.bonoSize || 10;
+      const pct = Math.min(1, left / total); const offset = CIRC * (1 - pct);
+      const color = left <= 2 ? 'var(--red)' : left <= 4 ? 'var(--orange)' : 'var(--green)';
+      const pctTxt = Math.round(pct * 100); const firstName = esc(c.name).split(' ')[0];
       return `<div class="dash-ring-item" onclick="openClientDetail('${c.id}')">
         <div style="position:relative;width:64px;height:64px">
           <svg class="dash-ring-svg" width="64" height="64" viewBox="0 0 64 64">
             <circle class="dash-ring-track" cx="32" cy="32" r="${R}"/>
-            <circle class="dash-ring-fill"
-              cx="32" cy="32" r="${R}"
-              stroke="${color}"
-              stroke-dasharray="${CIRC}"
-              stroke-dashoffset="${offset}"
-            />
+            <circle class="dash-ring-fill" cx="32" cy="32" r="${R}" stroke="${color}" stroke-dasharray="${CIRC}" stroke-dashoffset="${offset}"/>
           </svg>
           <div class="dash-ring-pct" style="color:${color}">${pctTxt}%</div>
         </div>
@@ -742,6 +727,19 @@ function renderDashboard() {
     }).join('');
   }
 }
+
+// ── Quick complete from dashboard ──────────────────────────
+window.quickCompleteSlot = async function (id) {
+  const s = slots.find(x => x.id === id);
+  if (!s) return;
+  if (!confirm('¿Marcar como completada?')) return;
+  await updateDoc(doc(db, 'slots', s.id), { status: 'completed', updatedAt: Timestamp.now() });
+  const client = clients.find(c => c.id === s.clientId);
+  if (client && client.paymentType === 'bono' && (client.sessionsLeft || 0) > 0) {
+    await updateDoc(doc(db, 'clients', client.id), { sessionsLeft: client.sessionsLeft - 1 });
+  }
+  showToast('☑️ Sesión completada');
+};
 
 // ═══════════════════════════════════════════════════════════
 //  CLIENTES
@@ -766,6 +764,7 @@ window.renderClientes = function () {
     return match;
   });
 
+  const now = new Date();
   const el = $('clients-grid');
   if (list.length === 0) {
     el.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><span>👥</span><p>No hay clientes todavía</p><button class="btn btn-primary btn-sm" onclick="openClientModal()">+ Añadir primer cliente</button></div>`;
@@ -781,6 +780,17 @@ window.renderClientes = function () {
       const level = (c.sessionsLeft || 0) <= 2 ? 'danger' : (c.sessionsLeft || 0) <= 4 ? 'warning' : 'ok';
       bonoTag = `<span class="tag tag-${level}">${c.sessionsLeft || 0} ses.</span>`;
     }
+    // Inactivity indicator
+    const lastSlot = slots.filter(s => s.clientId === c.id && s.status === 'completed').sort((a,b) => toDate(b.date)-toDate(a.date))[0];
+    const daysSince = lastSlot ? Math.floor((now - toDate(lastSlot.date)) / 86400000) : null;
+    const inactiveTag = daysSince !== null && daysSince > 14
+      ? `<span class="tag tag-inactive" title="${daysSince} días sin sesión">⚠️ Inactivo</span>` : '';
+
+    // Next session
+    const nextSl = slots.filter(s => s.clientId === c.id && toDate(s.date) >= now && s.status !== 'cancelled').sort((a,b) => toDate(a.date)-toDate(b.date))[0];
+    const nextTag = nextSl
+      ? `<span class="client-next-session">📅 ${toDate(nextSl.date).toLocaleDateString('es-ES',{weekday:'short',day:'numeric',month:'short'})}</span>` : '';
+
     const color = avatarColor(c.name);
     const initials = c.name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
     return `<div class="client-card" onclick="openClientDetail('${c.id}')">
@@ -788,7 +798,8 @@ window.renderClientes = function () {
       <div class="client-info">
         <h3>${esc(c.name)}</h3>
         <p>${esc(c.phone || c.email || '—')}</p>
-        <div class="client-tags">${statusTag}${payTag}${bonoTag}</div>
+        <div class="client-tags">${statusTag}${payTag}${bonoTag}${inactiveTag}</div>
+        ${nextTag}
       </div>
     </div>`;
   }).join('');
@@ -822,21 +833,15 @@ window.saveClient = async function () {
   const name = $('c-name').value.trim();
   if (!name) { alert('El nombre es obligatorio'); return; }
   const data = {
-    name,
-    phone:       $('c-phone').value.trim(),
-    email:       $('c-email').value.trim(),
-    paymentType: $('c-payment-type').value,
-    bonoSize:    parseInt($('c-bono-size').value) || 10,
-    sessionsLeft: parseInt($('c-sessions-left').value) || 0,
-    notes:       $('c-notes').value.trim(),
-    active:      $('c-active').checked,
-    updatedAt:   Timestamp.now(),
+    name, phone: $('c-phone').value.trim(), email: $('c-email').value.trim(),
+    paymentType: $('c-payment-type').value, bonoSize: parseInt($('c-bono-size').value) || 10,
+    sessionsLeft: parseInt($('c-sessions-left').value) || 0, notes: $('c-notes').value.trim(),
+    active: $('c-active').checked, updatedAt: Timestamp.now(),
   };
   if (editingClient) {
     await updateDoc(doc(db, 'clients', editingClient.id), data);
   } else {
-    data.createdAt = Timestamp.now();
-    data.totalPaid = 0;
+    data.createdAt = Timestamp.now(); data.totalPaid = 0;
     await addDoc(collection(db, 'clients'), data);
   }
   closeModalClient();
@@ -853,69 +858,48 @@ window.deleteClient = async function () {
 
 window.closeModalClient = function (e) {
   if (e && e.target !== $('modal-client')) return;
-  hide('modal-client');
-  editingClient = null;
+  hide('modal-client'); editingClient = null;
 };
 
 // ═══════════════════════════════════════════════════════════
 //  CALENDARIO
 // ═══════════════════════════════════════════════════════════
-const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 7–20
-let showWeekend = false; // sábado y domingo ocultos por defecto
+const HOURS = Array.from({ length: 14 }, (_, i) => i + 7);
+let showWeekend = false;
 
 window.changeWeek = function (dir) {
   currentWeek = new Date(currentWeek);
   currentWeek.setDate(currentWeek.getDate() + dir * 7);
   renderCalendario();
 };
-
-window.goToday = function () {
-  currentWeek = new Date();
-  renderCalendario();
-};
-
-window.toggleWeekend = function () {
-  showWeekend = !showWeekend;
-  renderCalendario();
-};
+window.goToday = function () { currentWeek = new Date(); renderCalendario(); };
+window.toggleWeekend = function () { showWeekend = !showWeekend; renderCalendario(); };
 
 function getWeekStart(d) {
-  const date = new Date(d);
-  const day  = date.getDay();
+  const date = new Date(d); const day = date.getDay();
   const diff = (day === 0 ? -6 : 1 - day);
-  date.setDate(date.getDate() + diff);
-  date.setHours(0, 0, 0, 0);
-  return date;
+  date.setDate(date.getDate() + diff); date.setHours(0, 0, 0, 0); return date;
 }
 
-
-// ── px per minute constant (40px per hour) ───────────────
 const PX_PER_MIN = 40 / 60;
 const PX_PER_HOUR = 40;
-const CAL_START_H = 7; // first visible hour
-
+const CAL_START_H = 7;
 function minutesToPx(minutes) { return minutes * PX_PER_MIN; }
 function timeToTopPx(h, m) { return minutesToPx((h - CAL_START_H) * 60 + m); }
 
-// ── Drag state ────────────────────────────────────────────
 let dragSlotId   = null;
-let dragOffsetMin = 0; // minutes from event top where user grabbed
+let dragOffsetMin = 0;
 
 function renderCalendario() {
   if (!dataLoaded.clients || !dataLoaded.slots) return;
 
   const weekStart = getWeekStart(currentWeek);
   const allDays = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart);
-    d.setDate(d.getDate() + i);
-    return d;
+    const d = new Date(weekStart); d.setDate(d.getDate() + i); return d;
   });
-
-  // Sábado (idx 5) y domingo (idx 6) se ocultan si showWeekend=false
   const days = showWeekend ? allDays : allDays.slice(0, 5);
   const numDays = days.length;
 
-  // Update weekend toggle button label
   const wkBtn = document.getElementById('toggle-weekend-btn');
   if (wkBtn) wkBtn.textContent = showWeekend ? '← Ocultar fin de semana' : 'Ver fin de semana →';
 
@@ -928,63 +912,56 @@ function renderCalendario() {
   const calendarEl = $('calendar-grid');
   const totalHours = HOURS.length;
   const colHeight  = totalHours * PX_PER_HOUR;
-
-  // ── Build HTML ────────────────────────────────────────
   const gridCols = `52px repeat(${numDays}, 1fr)`;
-  // Header row
+
+  // Header
   let html = `<div class="cal-header-row" style="grid-template-columns:${gridCols}">
     <div class="cal-corner"></div>`;
   days.forEach((d, i) => {
     const isT = d.getTime() === today.getTime();
+    // Day occupancy (non-cancelled slots)
+    const daySlotCount = slots.filter(s => {
+      const sd = toDate(s.date);
+      return sd.getFullYear() === d.getFullYear() && sd.getMonth() === d.getMonth() && sd.getDate() === d.getDate() && s.status !== 'cancelled';
+    }).length;
+    const maxSlots = 8;
+    const occupancy = Math.min(100, (daySlotCount / maxSlots) * 100);
     html += `<div class="cal-day-header ${isT ? 'today' : ''}">
       <span class="day-name">${DAYS_ES[i]}</span>
       <span class="day-number">${d.getDate()}</span>
+      ${daySlotCount > 0 ? `<div class="cal-day-occ-bar" title="${daySlotCount} sesiones"><div class="cal-day-occ-fill" style="width:${occupancy}%"></div></div>` : ''}
     </div>`;
   });
   html += `</div>`;
 
   // Body
   html += `<div class="cal-body" style="grid-template-columns:${gridCols}">`;
-
-  // Time gutter
   html += `<div class="cal-time-col">`;
-  HOURS.forEach(h => {
-    html += `<div class="cal-time">${h}:00</div>`;
-  });
+  HOURS.forEach(h => { html += `<div class="cal-time">${h}:00</div>`; });
   html += `</div>`;
 
-  // Day columns
   days.forEach((day, dayIdx) => {
     const isT = day.getTime() === today.getTime();
-    const dateKey = `${day.getFullYear()}-${day.getMonth()}-${day.getDate()}`;
-
-    // Events for this day
     const daySlots = slots.filter(s => {
       const sd = toDate(s.date);
-      return sd.getFullYear() === day.getFullYear()
-          && sd.getMonth()    === day.getMonth()
-          && sd.getDate()     === day.getDate();
+      return sd.getFullYear() === day.getFullYear() && sd.getMonth() === day.getMonth() && sd.getDate() === day.getDate();
     });
 
-    // Build hour grid lines (non-interactive, just visual)
     let gridLines = '';
     HOURS.forEach(() => { gridLines += `<div class="cal-hour-slot half-mark"></div>`; });
 
-    // Build event chips
     let evHtml = '';
     daySlots.forEach(s => {
       const sd = toDate(s.date);
-      const h  = sd.getHours();
-      const m  = sd.getMinutes();
+      const h = sd.getHours(); const m = sd.getMinutes();
       const dur = s.duration || 60;
-      const top  = timeToTopPx(h, m);
+      const top = timeToTopPx(h, m);
       const height = Math.max(22, minutesToPx(dur) - 3);
+      if (top < 0 || top > colHeight) return;
 
-      if (top < 0 || top > colHeight) return; // outside visible range
-
-      const client = clients.find(c => c.id === s.clientId);
-      const label  = client ? client.name : (s.title || 'Bloqueado');
-      const status = s.status || 'scheduled';
+      const client  = clients.find(c => c.id === s.clientId);
+      const label   = client ? client.name : (s.title || 'Bloqueado');
+      const status  = s.status || 'scheduled';
       const statusCls = status === 'completed' ? 'status-completed'
                       : status === 'pending'   ? 'status-pending'
                       : status === 'cancelled' ? 'status-cancelled' : '';
@@ -993,21 +970,34 @@ function renderCalendario() {
       const endTime   = formatTime(endDate);
       const showTime  = height >= 36;
 
+      // Color per client (use client color for type=client, else default)
+      const evColor = (s.type === 'client' && client) ? avatarColor(client.name) : null;
+      const colorStyle = evColor && status !== 'cancelled' ? `border-left: 3px solid ${evColor};` : '';
+
+      // Repeat badge
+      const repeatBadge = s.repeatGroupId ? `<span class="ev-repeat-badge" title="Sesión repetida">🔁</span>` : '';
+
+      // Quick complete button (hover)
+      const canComplete = status !== 'completed' && status !== 'cancelled' && s.clientId;
+      const quickBtn = canComplete
+        ? `<button class="ev-quick-complete" onclick="event.stopPropagation();quickCompleteSlot('${s.id}')" title="Completar">✓</button>` : '';
+
       evHtml += `<div class="cal-event type-${s.type || 'client'} ${statusCls}"
-        style="top:${top}px;height:${height}px"
+        style="top:${top}px;height:${height}px;${colorStyle}"
         data-slot-id="${s.id}"
         draggable="true"
         onclick="openSlotModal('${s.id}',event)"
         data-tooltip-name="${esc(label)}"
         data-tooltip-time="${startTime} – ${endTime}"
         data-tooltip-dur="${dur} min"
-        data-tooltip-status="${esc(statusLabel(status))}">
-        <span class="ev-label">${esc(label)}</span>
+        data-tooltip-status="${esc(statusLabel(status))}"
+        data-tooltip-repeat="${s.repeatGroupId ? 'true' : ''}">
+        <span class="ev-label">${esc(label)}${repeatBadge}</span>
         ${showTime ? `<span class="ev-time">${startTime} – ${endTime}</span>` : ''}
+        ${quickBtn}
       </div>`;
     });
 
-    // Now line (only on today's column)
     let nowLine = '';
     if (isT) {
       const now = new Date();
@@ -1019,30 +1009,24 @@ function renderCalendario() {
 
     html += `<div class="cal-day-col ${isT ? 'today-col' : ''}"
       data-day-idx="${dayIdx}"
-      data-date="${dateKey}"
       onclick="handleColClick(event,${dayIdx})"
       ondragover="handleDragOver(event)"
       ondragleave="handleDragLeave(event)"
       ondrop="handleDrop(event,${dayIdx})">
-      ${gridLines}
-      ${nowLine}
-      ${evHtml}
+      ${gridLines}${nowLine}${evHtml}
     </div>`;
   });
 
-  html += `</div>`; // .cal-body
-
+  html += `</div>`;
   calendarEl.innerHTML = html;
 
-  // Attach drag listeners imperatively (draggable=true alone needs ondragstart)
   calendarEl.querySelectorAll('.cal-event[data-slot-id]').forEach(el => {
     el.addEventListener('dragstart', e => {
       dragSlotId = el.dataset.slotId;
-      const s  = slots.find(x => x.id === dragSlotId);
+      const s = slots.find(x => x.id === dragSlotId);
       if (!s) return;
-      const sd = toDate(s.date);
-      const eventTopPx = parseFloat(el.style.top);
-      const colRect    = el.closest('.cal-day-col').getBoundingClientRect();
+      const eventTopPx  = parseFloat(el.style.top);
+      const colRect     = el.closest('.cal-day-col').getBoundingClientRect();
       const grabOffsetPx = e.clientY - colRect.top - eventTopPx;
       dragOffsetMin = Math.round(grabOffsetPx / PX_PER_MIN);
       el.classList.add('dragging');
@@ -1055,9 +1039,9 @@ function renderCalendario() {
     });
   });
 
-  // ── Week summary ─────────────────────────────────────
-  const weekEnd   = new Date(allDays[6]); weekEnd.setHours(23,59,59,999);
-  const weekBeg   = new Date(allDays[0]); weekBeg.setHours(0,0,0,0);
+  // Week summary
+  const weekEnd = new Date(allDays[6]); weekEnd.setHours(23,59,59,999);
+  const weekBeg = new Date(allDays[0]); weekBeg.setHours(0,0,0,0);
   const weekSlots = slots.filter(s => { const d = toDate(s.date); return d >= weekBeg && d <= weekEnd; });
   const countByStatus = { scheduled:0, completed:0, pending:0, cancelled:0 };
   weekSlots.forEach(s => { const st = s.status || 'scheduled'; if (st in countByStatus) countByStatus[st]++; });
@@ -1076,7 +1060,6 @@ function renderCalendario() {
         </div>`;
   }
 
-  // Tick now-line every minute
   clearInterval(window._nowLineTick);
   window._nowLineTick = setInterval(() => {
     const nowLine = calendarEl.querySelector('.cal-now-line');
@@ -1086,75 +1069,95 @@ function renderCalendario() {
   }, 60000);
 }
 
-// ── Drag-and-drop handlers ────────────────────────────────
+// ── Drag & Drop ───────────────────────────────────────────
 window.handleColClick = function (e, dayIdx) {
-  // Only fire on bare column click, not on child events
   if (e.target.closest('.cal-event')) return;
-  const col     = e.currentTarget;
-  const rect    = col.getBoundingClientRect();
+  const col = e.currentTarget;
+  const rect = col.getBoundingClientRect();
   const offsetPx = e.clientY - rect.top;
   const totalMin = offsetPx / PX_PER_MIN;
   const absMin   = CAL_START_H * 60 + totalMin;
   const h = Math.floor(absMin / 60);
-  const m = Math.round((absMin % 60) / 15) * 15; // snap to 15 min
+  const m = Math.round((absMin % 60) / 15) * 15;
   const weekStart = getWeekStart(currentWeek);
-  const day = new Date(weekStart);
-  day.setDate(day.getDate() + dayIdx);
+  const day = new Date(weekStart); day.setDate(day.getDate() + dayIdx);
   const dateStr = `${day.getFullYear()}-${String(day.getMonth()+1).padStart(2,'0')}-${String(day.getDate()).padStart(2,'0')}`;
   openSlotModal(null, null, dateStr, h, m);
 };
 
 window.handleDragOver = function (e) {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
+  e.preventDefault(); e.dataTransfer.dropEffect = 'move';
   e.currentTarget.classList.add('drag-over');
 };
-
-window.handleDragLeave = function (e) {
-  e.currentTarget.classList.remove('drag-over');
-};
+window.handleDragLeave = function (e) { e.currentTarget.classList.remove('drag-over'); };
 
 window.handleDrop = async function (e, dayIdx) {
-  e.preventDefault();
-  e.currentTarget.classList.remove('drag-over');
+  e.preventDefault(); e.currentTarget.classList.remove('drag-over');
   if (!dragSlotId) return;
-
   const s = slots.find(x => x.id === dragSlotId);
   if (!s) return;
 
-  const col      = e.currentTarget;
-  const rect     = col.getBoundingClientRect();
+  // Warn if part of a repeat group
+  if (s.repeatGroupId) {
+    if (!confirm('Esta sesión pertenece a una serie repetida.\n¿Mover solo esta sesión?')) {
+      dragSlotId = null; return;
+    }
+  }
+
+  const col = e.currentTarget; const rect = col.getBoundingClientRect();
   const offsetPx = e.clientY - rect.top;
-  // Subtract the grab offset so the event stays under the cursor where you grabbed it
   const rawMin   = offsetPx / PX_PER_MIN - dragOffsetMin;
   const absMin   = CAL_START_H * 60 + rawMin;
-  // Snap to 15 min grid
   const snappedMin = Math.round(absMin / 15) * 15;
   const newH = Math.max(CAL_START_H, Math.min(20, Math.floor(snappedMin / 60)));
   const newM = snappedMin % 60;
-
   const weekStart = getWeekStart(currentWeek);
-  const day = new Date(weekStart);
-  day.setDate(day.getDate() + dayIdx);
+  const day = new Date(weekStart); day.setDate(day.getDate() + dayIdx);
   const newDate = new Date(day.getFullYear(), day.getMonth(), day.getDate(), newH, newM, 0);
-
-  await updateDoc(doc(db, 'slots', s.id), {
-    date: Timestamp.fromDate(newDate),
-    updatedAt: Timestamp.now(),
-  });
+  await updateDoc(doc(db, 'slots', s.id), { date: Timestamp.fromDate(newDate), updatedAt: Timestamp.now() });
   dragSlotId = null;
   showToast('📅 Sesión movida');
 };
 
-// ── Slot Modall ────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+//  RECURRING ACTION MODAL
+//  Shows when user tries to edit/delete a recurring slot
+// ═══════════════════════════════════════════════════════════
+let _recurCallback = null;
+
+function showRecurModal(title, onThis, onThisAndFuture, onAll) {
+  const modal = document.getElementById('modal-recur-action');
+  document.getElementById('recur-modal-title').textContent = title;
+  _recurCallback = { onThis, onThisAndFuture, onAll };
+  modal.classList.remove('hidden');
+}
+
+window.recurSelectThis = function () {
+  document.getElementById('modal-recur-action').classList.add('hidden');
+  _recurCallback?.onThis?.();
+};
+window.recurSelectFuture = function () {
+  document.getElementById('modal-recur-action').classList.add('hidden');
+  _recurCallback?.onThisAndFuture?.();
+};
+window.recurSelectAll = function () {
+  document.getElementById('modal-recur-action').classList.add('hidden');
+  _recurCallback?.onAll?.();
+};
+window.closeRecurModal = function () {
+  document.getElementById('modal-recur-action').classList.add('hidden');
+  _recurCallback = null;
+};
+
+// ── Slot Modal ─────────────────────────────────────────────
 window.openSlotModal = function (id, e, prefillDate, prefillHour, prefillMin) {
   if (e) e.stopPropagation();
   editingSlot = id ? slots.find(s => s.id === id) : null;
+  slotModalDirty = false;
 
   $('modal-slot-title').textContent = editingSlot ? 'Editar Sesión' : 'Nueva Sesión';
   $('slot-id').value = editingSlot?.id || '';
 
-  // Populate client select
   const clientSel = $('s-client');
   clientSel.innerHTML = '<option value="">— Selecciona cliente —</option>' +
     clients.filter(c => c.active).map(c =>
@@ -1163,9 +1166,7 @@ window.openSlotModal = function (id, e, prefillDate, prefillHour, prefillMin) {
       </option>`
     ).join('');
 
-  // Populate hour + minute selects
-  const hourSel = $('s-hour');
-  const minSel  = $('s-min');
+  const hourSel = $('s-hour'); const minSel = $('s-min');
   const editH = editingSlot ? toDate(editingSlot.date).getHours()   : (prefillHour ?? 9);
   const editM = editingSlot ? toDate(editingSlot.date).getMinutes() : (prefillMin  ?? 0);
   hourSel.innerHTML = HOURS.map(h =>
@@ -1188,6 +1189,19 @@ window.openSlotModal = function (id, e, prefillDate, prefillHour, prefillMin) {
     show('btn-delete-slot');
     if (editingSlot.clientId && editingSlot.status !== 'completed') show('btn-complete-slot');
     else hide('btn-complete-slot');
+
+    // Series info badge
+    const seriesInfo = document.getElementById('series-info');
+    if (seriesInfo) {
+      if (editingSlot.repeatGroupId) {
+        const group = slots.filter(s => s.repeatGroupId === editingSlot.repeatGroupId).sort((a,b) => toDate(a.date)-toDate(b.date));
+        const idx = group.findIndex(s => s.id === editingSlot.id);
+        seriesInfo.textContent = `🔁 Sesión ${idx + 1} de ${group.length}`;
+        seriesInfo.style.display = 'inline-block';
+      } else {
+        seriesInfo.style.display = 'none';
+      }
+    }
   } else {
     $('s-type').value     = 'client';
     $('s-date').value     = prefillDate || '';
@@ -1199,19 +1213,26 @@ window.openSlotModal = function (id, e, prefillDate, prefillHour, prefillMin) {
     $('repeat-section').style.display = 'block';
     hide('btn-delete-slot');
     hide('btn-complete-slot');
-    // Reset repetición
     $('s-repeat').checked = false;
     hide('repeat-box');
-    // Desmarcar todos los días
     document.querySelectorAll('.day-btn').forEach(b => b.classList.remove('selected'));
-    // Pre-seleccionar el día de la fecha elegida
     if (prefillDate) {
       const [y, m, d] = prefillDate.split('-').map(Number);
       const wd = new Date(y, m-1, d).getDay();
       const btn = document.querySelector(`.day-btn[data-day="${wd}"]`);
       if (btn) btn.classList.add('selected');
     }
+    const seriesInfo = document.getElementById('series-info');
+    if (seriesInfo) seriesInfo.style.display = 'none';
   }
+
+  // Dirty tracking
+  const modal = $('modal-slot');
+  ['s-client','s-type','s-date','s-hour','s-min','s-duration','s-notes','s-status','s-title'].forEach(fieldId => {
+    const el = $(fieldId);
+    if (el) el.addEventListener('change', () => { slotModalDirty = true; }, { once: true });
+  });
+
   toggleSlotFields();
   show('modal-slot');
 };
@@ -1224,14 +1245,9 @@ window.toggleSlotFields = function () {
 
 window.toggleRepeatBox = function () {
   const checked = $('s-repeat').checked;
-  toggleClass('repeat-box', 'hidden', !checked);
+  if (checked) { show('repeat-box'); } else { hide('repeat-box'); }
 };
 
-window.toggleDayBtn = function (btn) {
-  btn.classList.toggle('selected');
-};
-
-// Bind day buttons + preview update
 document.getElementById('days-picker').addEventListener('click', e => {
   const btn = e.target.closest('.day-btn');
   if (btn) { btn.classList.toggle('selected'); updateRepeatPreview(); }
@@ -1240,23 +1256,18 @@ document.getElementById('days-picker').addEventListener('click', e => {
 window.updateRepeatPreview = function () {
   const preview = document.getElementById('repeat-preview');
   if (!preview) return;
-  const total = parseInt($('s-weeks')?.value || 12);
+  const total = parseInt($('s-repeat-count')?.value || 12);
   const nDays = document.querySelectorAll('.day-btn.selected').length;
-  if (nDays === 0) { preview.textContent = ''; return; }
-  const perDay   = Math.floor(total / nDays);
-  const rem      = total % nDays;
+  if (nDays === 0 || !total) { preview.textContent = ''; return; }
   const weekSpan = Math.ceil(total / nDays);
   const NAMES = { 0:'Dom',1:'Lun',2:'Mar',3:'Mié',4:'Jue',5:'Vie',6:'Sáb' };
   const dayNames = Array.from(document.querySelectorAll('.day-btn.selected'))
     .map(b => NAMES[b.dataset.day]).join(' + ');
   if (nDays === 1) {
-    preview.textContent = `→ ${total} ${dayNames} · ~${weekSpan} semanas`;
+    preview.textContent = `→ ${total} sesiones · ~${weekSpan} semanas`;
   } else {
-    if (rem === 0) {
-      preview.textContent = `→ ${perDay} × ${dayNames} = ${total} sesiones · ~${weekSpan} semanas`;
-    } else {
-      preview.textContent = `→ ${total} sesiones entre ${dayNames} · ~${weekSpan} semanas`;
-    }
+    const perDay = Math.floor(total / nDays);
+    preview.textContent = `→ ~${perDay} × ${dayNames} = ${total} sesiones · ~${weekSpan} semanas`;
   }
 };
 
@@ -1283,9 +1294,64 @@ window.saveSlot = async function () {
 
   if (editingSlot) {
     baseData.date = Timestamp.fromDate(new Date(y, m-1, d, hour, min, 0));
-    await updateDoc(doc(db, 'slots', editingSlot.id), baseData);
-    closeModalSlot();
-    showToast('✅ Sesión actualizada');
+
+    if (editingSlot.repeatGroupId) {
+      // Ask what scope to apply changes to
+      const group = slots
+        .filter(s => s.repeatGroupId === editingSlot.repeatGroupId)
+        .sort((a, b) => toDate(a.date) - toDate(b.date));
+      const editDate = toDate(editingSlot.date);
+
+      showRecurModal('Editar sesión repetida',
+        // Only this
+        async () => {
+          await updateDoc(doc(db, 'slots', editingSlot.id), baseData);
+          closeModalSlot();
+          showToast('✅ Sesión actualizada');
+        },
+        // This and future
+        async () => {
+          const future = group.filter(s => toDate(s.date) >= editDate);
+          for (const s of future) {
+            const sd = toDate(s.date);
+            const newDate = new Date(sd.getFullYear(), sd.getMonth(), sd.getDate(), hour, min, 0);
+            await updateDoc(doc(db, 'slots', s.id), {
+              ...baseData,
+              date: Timestamp.fromDate(newDate),
+              clientId: baseData.clientId,
+              title: baseData.title,
+              duration: baseData.duration,
+              notes: baseData.notes,
+              status: baseData.status,
+            });
+          }
+          closeModalSlot();
+          showToast(`✅ ${future.length} sesiones actualizadas`);
+        },
+        // All
+        async () => {
+          for (const s of group) {
+            const sd = toDate(s.date);
+            const newDate = new Date(sd.getFullYear(), sd.getMonth(), sd.getDate(), hour, min, 0);
+            await updateDoc(doc(db, 'slots', s.id), {
+              ...baseData,
+              date: Timestamp.fromDate(newDate),
+              clientId: baseData.clientId,
+              title: baseData.title,
+              duration: baseData.duration,
+              notes: baseData.notes,
+              status: baseData.status,
+            });
+          }
+          closeModalSlot();
+          showToast(`✅ ${group.length} sesiones actualizadas`);
+        }
+      );
+    } else {
+      await updateDoc(doc(db, 'slots', editingSlot.id), baseData);
+      closeModalSlot();
+      showToast('✅ Sesión actualizada');
+    }
     return;
   }
 
@@ -1294,72 +1360,91 @@ window.saveSlot = async function () {
 
   if (!isRepeat) {
     await addDoc(collection(db, 'slots'), {
-      ...baseData,
-      date: Timestamp.fromDate(baseDate),
-      createdAt: Timestamp.now(),
+      ...baseData, date: Timestamp.fromDate(baseDate), createdAt: Timestamp.now(),
     });
-  } else {
-    // ── Repetición: N ocurrencias totales entre los días seleccionados ──
-    // Ejemplo: 12 ocurrencias con Mar+Jue → 6 martes + 6 jueves = 12 sesiones
-    const totalOccurrences = parseInt($('s-weeks').value) || 12;
-    const selectedDays = Array.from(document.querySelectorAll('.day-btn.selected'))
-      .map(b => parseInt(b.dataset.day)); // JS: 0=Dom,1=Lun,...,6=Sáb
-
-    if (selectedDays.length === 0) {
-      alert('Selecciona al menos un día de la semana para repetir.');
-      return;
-    }
-
-    // Ordenar días lunes→domingo para recorrerlos en orden dentro de cada semana
-    const sortedDays = [...selectedDays].sort((a, b) => {
-      const toMon = x => x === 0 ? 7 : x; // Dom=0 → 7 (al final)
-      return toMon(a) - toMon(b);
-    });
-
-    const dates = [];
-    const monday = getWeekStart(baseDate); // Lunes de la semana inicial
-    let week = 0;
-
-    while (dates.length < totalOccurrences && week < 500) {
-      for (const wd of sortedDays) {
-        if (dates.length >= totalOccurrences) break;
-        // Offset desde el lunes: Lun=1→0, Mar=2→1,…, Dom=0→6
-        const offset = wd === 0 ? 6 : wd - 1;
-        const target = new Date(monday);
-        target.setDate(target.getDate() + week * 7 + offset);
-        target.setHours(hour, min, 0, 0);
-        // No incluir fechas anteriores a la fecha base
-        if (target < baseDate) continue;
-        dates.push(new Date(target));
-      }
-      week++;
-    }
-
-    const groupId = `group_${Date.now()}`;
-    for (const dt of dates) {
-      await addDoc(collection(db, 'slots'), {
-        ...baseData,
-        date: Timestamp.fromDate(dt),
-        createdAt: Timestamp.now(),
-        repeatGroupId: groupId,
-        repeatTotal: dates.length,
-      });
-    }
-    showToast(`✅ ${dates.length} sesiones creadas`);
     closeModalSlot();
+    showToast('✅ Sesión guardada');
     return;
   }
 
+  // ── Repetición ────────────────────────────────────────
+  const totalOccurrences = parseInt($('s-repeat-count')?.value || 12);
+  if (!totalOccurrences || totalOccurrences < 1) { alert('Introduce el número de sesiones'); return; }
+  const selectedDays = Array.from(document.querySelectorAll('.day-btn.selected')).map(b => parseInt(b.dataset.day));
+  if (selectedDays.length === 0) { alert('Selecciona al menos un día de la semana'); return; }
+
+  const sortedDays = [...selectedDays].sort((a, b) => {
+    const toMon = x => x === 0 ? 7 : x;
+    return toMon(a) - toMon(b);
+  });
+
+  const dates = [];
+  const monday = getWeekStart(baseDate);
+  let week = 0;
+  while (dates.length < totalOccurrences && week < 500) {
+    for (const wd of sortedDays) {
+      if (dates.length >= totalOccurrences) break;
+      const offset = wd === 0 ? 6 : wd - 1;
+      const target = new Date(monday);
+      target.setDate(target.getDate() + week * 7 + offset);
+      target.setHours(hour, min, 0, 0);
+      if (target < baseDate) continue;
+      dates.push(new Date(target));
+    }
+    week++;
+  }
+
+  const groupId = `group_${Date.now()}`;
+  for (const dt of dates) {
+    await addDoc(collection(db, 'slots'), {
+      ...baseData,
+      date: Timestamp.fromDate(dt),
+      createdAt: Timestamp.now(),
+      repeatGroupId: groupId,
+      repeatTotal: dates.length,
+    });
+  }
+  showToast(`✅ ${dates.length} sesiones creadas`);
   closeModalSlot();
-  showToast('✅ Sesión guardada');
 };
 
+// ── Delete Slot ───────────────────────────────────────────
 window.deleteSlot = async function () {
   if (!editingSlot) return;
-  if (!confirm('¿Eliminar esta sesión?')) return;
-  await deleteDoc(doc(db, 'slots', editingSlot.id));
-  closeModalSlot();
-  showToast('🗑️ Sesión eliminada', 'info');
+
+  if (editingSlot.repeatGroupId) {
+    const group = slots
+      .filter(s => s.repeatGroupId === editingSlot.repeatGroupId)
+      .sort((a, b) => toDate(a.date) - toDate(b.date));
+    const editDate = toDate(editingSlot.date);
+
+    showRecurModal('Eliminar sesión repetida',
+      // Only this
+      async () => {
+        await deleteDoc(doc(db, 'slots', editingSlot.id));
+        closeModalSlot();
+        showToast('🗑️ Sesión eliminada', 'info');
+      },
+      // This and future
+      async () => {
+        const future = group.filter(s => toDate(s.date) >= editDate);
+        for (const s of future) await deleteDoc(doc(db, 'slots', s.id));
+        closeModalSlot();
+        showToast(`🗑️ ${future.length} sesiones eliminadas`, 'info');
+      },
+      // All
+      async () => {
+        for (const s of group) await deleteDoc(doc(db, 'slots', s.id));
+        closeModalSlot();
+        showToast(`🗑️ ${group.length} sesiones eliminadas`, 'info');
+      }
+    );
+  } else {
+    if (!confirm('¿Eliminar esta sesión?')) return;
+    await deleteDoc(doc(db, 'slots', editingSlot.id));
+    closeModalSlot();
+    showToast('🗑️ Sesión eliminada', 'info');
+  }
 };
 
 window.completeSlot = async function () {
@@ -1376,8 +1461,12 @@ window.completeSlot = async function () {
 
 window.closeModalSlot = function (e) {
   if (e && e.target !== $('modal-slot')) return;
+  if (slotModalDirty) {
+    if (!confirm('Tienes cambios sin guardar. ¿Salir de todas formas?')) return;
+  }
   hide('modal-slot');
   editingSlot = null;
+  slotModalDirty = false;
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -1389,90 +1478,53 @@ window.changeMonth = function (dir) {
   renderPagos();
 };
 
-// ── Payment selection state ───────────────────────────────
 let selectedPaymentIds = new Set();
 
 function updateSelectionBadge() {
   const badge = document.getElementById('selection-badge');
   if (!badge) return;
   const n = selectedPaymentIds.size;
-  if (n > 0) {
-    badge.textContent = `${n} seleccionado${n > 1 ? 's' : ''}`;
-    badge.classList.add('visible');
-  } else {
-    badge.classList.remove('visible');
-  }
+  if (n > 0) { badge.textContent = `${n} seleccionado${n > 1 ? 's' : ''}`; badge.classList.add('visible'); }
+  else { badge.classList.remove('visible'); }
 }
 
 function togglePaymentSelection(e, id) {
   e.stopPropagation();
-  if (selectedPaymentIds.has(id)) {
-    selectedPaymentIds.delete(id);
-  } else {
-    selectedPaymentIds.add(id);
-  }
+  if (selectedPaymentIds.has(id)) { selectedPaymentIds.delete(id); }
+  else { selectedPaymentIds.add(id); }
   const row = document.querySelector(`.payment-row[data-id="${id}"]`);
   if (row) row.classList.toggle('selected', selectedPaymentIds.has(id));
   updateSelectionBadge();
 }
 
 window.exportPaymentsCSV = function () {
-  const y = currentMonth.getFullYear();
-  const m = currentMonth.getMonth();
-  const monthPayments = payments.filter(p => {
-    const d = toDate(p.date);
-    return d.getFullYear() === y && d.getMonth() === m;
-  });
-
-  // Export selected rows if any, otherwise export all visible
-  const toExport = selectedPaymentIds.size > 0
-    ? monthPayments.filter(p => selectedPaymentIds.has(p.id))
-    : monthPayments;
-
+  const y = currentMonth.getFullYear(); const m = currentMonth.getMonth();
+  const monthPayments = payments.filter(p => { const d = toDate(p.date); return d.getFullYear() === y && d.getMonth() === m; });
+  const toExport = selectedPaymentIds.size > 0 ? monthPayments.filter(p => selectedPaymentIds.has(p.id)) : monthPayments;
   if (toExport.length === 0) { alert('No hay pagos para exportar'); return; }
-
   const headers = ['Fecha', 'Cliente', 'Concepto', 'Importe (€)', 'Sesiones', 'Notas'];
   const rows = toExport.map(p => {
     const client = clients.find(c => c.id === p.clientId);
-    const name   = client ? client.name : 'Cliente desconocido';
-    const d      = toDate(p.date).toLocaleDateString('es-ES');
-    const concept = conceptLabel(p.concept);
-    const amount  = (p.amount || 0).toFixed(2);
-    const sessions = p.concept === 'bono' ? (p.sessions || 0) : '';
-    const notes   = (p.notes || '').replace(/"/g, '""');
-    return `"${d}","${name}","${concept}","${amount}","${sessions}","${notes}"`;
+    const name = client ? client.name : 'Cliente desconocido';
+    const d = toDate(p.date).toLocaleDateString('es-ES');
+    return `"${d}","${name}","${conceptLabel(p.concept)}","${(p.amount||0).toFixed(2)}","${p.concept === 'bono' ? (p.sessions||0) : ''}","${(p.notes||'').replace(/"/g,'""')}"`;
   });
-
   const monthStr = currentMonth.toLocaleDateString('es-ES', { month:'long', year:'numeric' });
-  const csvContent = [headers.join(','), ...rows].join('\n');
-  const bom = '\uFEFF'; // UTF-8 BOM for Excel
-  const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = `pagos_${monthStr.replace(/ /g, '_')}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  const blob = new Blob(['\uFEFF' + [headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = `pagos_${monthStr.replace(/ /g,'_')}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 };
 
 function renderPagos() {
   if (!dataLoaded.clients || !dataLoaded.payments) return;
-  const y = currentMonth.getFullYear();
-  const m = currentMonth.getMonth();
+  const y = currentMonth.getFullYear(); const m = currentMonth.getMonth();
   $('month-label').textContent = currentMonth.toLocaleDateString('es-ES', { month:'long', year:'numeric' });
-
-  // Reset selection on month change
   selectedPaymentIds.clear();
 
-  const monthPayments = payments.filter(p => {
-    const d = toDate(p.date);
-    return d.getFullYear() === y && d.getMonth() === m;
-  });
-
-  const total     = monthPayments.reduce((s, p) => s + (p.amount || 0), 0);
-  const numBonos  = monthPayments.filter(p => p.concept === 'bono').length;
+  const monthPayments = payments.filter(p => { const d = toDate(p.date); return d.getFullYear() === y && d.getMonth() === m; });
+  const total = monthPayments.reduce((s, p) => s + (p.amount || 0), 0);
+  const numBonos = monthPayments.filter(p => p.concept === 'bono').length;
   const numOthers = monthPayments.filter(p => p.concept !== 'bono').length;
 
   $('payments-summary').innerHTML = `
@@ -1490,19 +1542,11 @@ function renderPagos() {
     </div>
     <div class="payments-toolbar-right">
       <div class="export-dropdown" id="export-dropdown">
-        <button class="btn btn-outline btn-sm btn-export" onclick="toggleExportDropdown(event)">
-          ⬇️ Exportar <span class="export-caret">▾</span>
-        </button>
+        <button class="btn btn-outline btn-sm btn-export" onclick="toggleExportDropdown(event)">⬇️ Exportar <span class="export-caret">▾</span></button>
         <div class="export-menu" id="export-menu">
-          <button class="export-menu-item" onclick="exportPaymentsCSV(); closeExportDropdown()">
-            <span>📄</span> CSV
-          </button>
-          <button class="export-menu-item" onclick="exportPaymentsXLSX(); closeExportDropdown()">
-            <span>📊</span> Excel (.xlsx)
-          </button>
-          <button class="export-menu-item" onclick="exportPaymentsPDF(); closeExportDropdown()">
-            <span>📋</span> PDF
-          </button>
+          <button class="export-menu-item" onclick="exportPaymentsCSV(); closeExportDropdown()"><span>📄</span> CSV</button>
+          <button class="export-menu-item" onclick="exportPaymentsXLSX(); closeExportDropdown()"><span>📊</span> Excel (.xlsx)</button>
+          <button class="export-menu-item" onclick="exportPaymentsPDF(); closeExportDropdown()"><span>📋</span> PDF</button>
         </div>
       </div>
     </div>
@@ -1513,8 +1557,8 @@ function renderPagos() {
   } else {
     html += monthPayments.map(p => {
       const client = clients.find(c => c.id === p.clientId);
-      const name   = client ? client.name : 'Cliente desconocido';
-      const d      = toDate(p.date);
+      const name = client ? client.name : 'Cliente desconocido';
+      const d = toDate(p.date);
       const isSelected = selectedPaymentIds.has(p.id);
       return `<div class="payment-row${isSelected ? ' selected' : ''}" data-id="${p.id}" onclick="openPaymentModal('${p.id}')">
         <div class="payment-checkbox-wrap" onclick="togglePaymentSelection(event, '${p.id}')">
@@ -1536,20 +1580,15 @@ function renderPagos() {
 // ── Payment Modal ─────────────────────────────────────────
 window.openPaymentModal = function (id) {
   editingPayment = id ? payments.find(p => p.id === id) : null;
-
   const clientSel = $('p-client');
   clientSel.innerHTML = '<option value="">— Selecciona cliente —</option>' +
     clients.map(c => `<option value="${c.id}" ${editingPayment?.clientId === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
-
   $('payment-id').value = editingPayment?.id || '';
   $('p-amount').value   = editingPayment?.amount || '';
-  $('p-date').value     = editingPayment
-    ? toDateInput(toDate(editingPayment.date))
-    : toDateInput(new Date());
+  $('p-date').value     = editingPayment ? toDateInput(toDate(editingPayment.date)) : toDateInput(new Date());
   $('p-concept').value  = editingPayment?.concept || 'bono';
   $('p-sessions').value = editingPayment?.sessions || 10;
   $('p-notes').value    = editingPayment?.notes || '';
-
   toggleClass('btn-delete-payment', 'hidden', !editingPayment);
   togglePBonoGroup();
   show('modal-payment');
@@ -1568,21 +1607,14 @@ window.savePayment = async function () {
   if (!clientId) { alert('Selecciona un cliente'); return; }
   if (!amount || isNaN(amount)) { alert('Introduce un importe'); return; }
   if (!dateStr) { alert('Selecciona una fecha'); return; }
-
   const [y, m, d] = dateStr.split('-').map(Number);
   const concept  = $('p-concept').value;
   const sessions = parseInt($('p-sessions').value) || 10;
-
   const data = {
-    clientId,
-    amount,
-    date:      Timestamp.fromDate(new Date(y, m-1, d)),
-    concept,
-    sessions:  concept === 'bono' ? sessions : 0,
-    notes:     $('p-notes').value.trim(),
-    updatedAt: Timestamp.now(),
+    clientId, amount, date: Timestamp.fromDate(new Date(y, m-1, d)),
+    concept, sessions: concept === 'bono' ? sessions : 0,
+    notes: $('p-notes').value.trim(), updatedAt: Timestamp.now(),
   };
-
   if (editingPayment) {
     await updateDoc(doc(db, 'payments', editingPayment.id), data);
   } else {
@@ -1590,20 +1622,10 @@ window.savePayment = async function () {
     await addDoc(collection(db, 'payments'), data);
     if (concept === 'bono') {
       const client = clients.find(c => c.id === clientId);
-      if (client) {
-        await updateDoc(doc(db, 'clients', clientId), {
-          sessionsLeft: (client.sessionsLeft || 0) + sessions,
-          bonoSize: sessions,
-          totalPaid: (client.totalPaid || 0) + amount,
-        });
-      }
+      if (client) await updateDoc(doc(db, 'clients', clientId), { sessionsLeft: (client.sessionsLeft || 0) + sessions, bonoSize: sessions, totalPaid: (client.totalPaid || 0) + amount });
     } else {
       const client = clients.find(c => c.id === clientId);
-      if (client) {
-        await updateDoc(doc(db, 'clients', clientId), {
-          totalPaid: (client.totalPaid || 0) + amount,
-        });
-      }
+      if (client) await updateDoc(doc(db, 'clients', clientId), { totalPaid: (client.totalPaid || 0) + amount });
     }
   }
   closeModalPayment();
@@ -1620,8 +1642,7 @@ window.deletePayment = async function () {
 
 window.closeModalPayment = function (e) {
   if (e && e.target !== $('modal-payment')) return;
-  hide('modal-payment');
-  editingPayment = null;
+  hide('modal-payment'); editingPayment = null;
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -1631,8 +1652,7 @@ function updateBadges(count) {
   if (count === undefined) {
     count = clients.filter(c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= parseInt(localStorage.getItem('notif-bono-threshold') || '2', 10)).length;
   }
-  const els = [$('nav-badge'), $('topbar-badge'), $('bottom-badge')];
-  els.forEach(el => {
+  [$('nav-badge'), $('topbar-badge'), $('bottom-badge')].forEach(el => {
     if (!el) return;
     if (count > 0) { el.textContent = count; el.classList.remove('hidden'); }
     else { el.classList.add('hidden'); }
@@ -1656,30 +1676,20 @@ function toDateInput(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).pa
 function payLabel(t)    { return { bono:'Bono', mensual:'Mensual', individual:'Individual' }[t] || t || 'Bono'; }
 function conceptLabel(t){ return { bono:'Renovación de bono', mensual:'Mensualidad', individual:'Sesión individual', otro:'Otro' }[t] || t || '—'; }
 function showError(id, msg) { const el=$(id); if(el){el.textContent=msg; el.classList.remove('hidden');} }
-
-function statusIcon(status) {
-  return { scheduled:'⏳', completed:'✅', pending:'🔶', cancelled:'❌' }[status] || '⏳';
-}
-function statusLabel(status) {
-  return { scheduled:'Programada', completed:'Completada', pending:'Pendiente confirmación', cancelled:'Cancelada' }[status] || 'Programada';
-}
+function statusIcon(status) { return { scheduled:'⏳', completed:'✅', pending:'🔶', cancelled:'❌' }[status] || '⏳'; }
+function statusLabel(status) { return { scheduled:'Programada', completed:'Completada', pending:'Pendiente confirmación', cancelled:'Cancelada' }[status] || 'Programada'; }
 
 // ═══════════════════════════════════════════════════════════
-//  GLOBAL SEARCH  (Cmd+K / Ctrl+K)
+//  GLOBAL SEARCH
 // ═══════════════════════════════════════════════════════════
-
 window.openSearch = function () {
   const overlay = document.getElementById('search-overlay');
   if (!overlay) return;
   overlay.classList.remove('hidden');
-  // Small delay so CSS transition fires after display:block
   requestAnimationFrame(() => {
     overlay.classList.add('visible');
     const input = document.getElementById('search-global-input');
-    if (input) {
-      input.value = '';
-      input.focus();
-    }
+    if (input) { input.value = ''; input.focus(); }
     document.getElementById('search-results').innerHTML = '';
   });
 };
@@ -1696,318 +1706,148 @@ function _dismissSearch() {
   setTimeout(() => overlay.classList.add('hidden'), 100);
 }
 
-// Keyboard shortcut: Cmd+K / Ctrl+K, Escape to close
-document.addEventListener('keydown', e => {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-    e.preventDefault();
-    const overlay = document.getElementById('search-overlay');
-    const isOpen  = overlay && !overlay.classList.contains('hidden');
-    isOpen ? _dismissSearch() : openSearch();
-    return;
-  }
-  if (e.key === 'Escape') {
-    const overlay = document.getElementById('search-overlay');
-    if (overlay && !overlay.classList.contains('hidden')) {
-      _dismissSearch();
-    }
-  }
-});
-
 window.runSearch = function (q) {
   const query   = (q || '').toLowerCase().trim();
   const results = document.getElementById('search-results');
   if (!results) return;
-
   if (!query) { results.innerHTML = ''; return; }
 
-  // ── Clientes ─────────────────────────────────────────
-  const matchClients = clients.filter(c =>
-    c.name.toLowerCase().includes(query) ||
-    (c.notes || '').toLowerCase().includes(query)
-  ).slice(0, 4);
-
-  // ── Sesiones ─────────────────────────────────────────
-  const matchSlots = slots.filter(s => {
-    const client = clients.find(c => c.id === s.clientId);
-    return (client && client.name.toLowerCase().includes(query));
-  }).slice(0, 4);
-
-  // ── Pagos ─────────────────────────────────────────────
+  const matchClients  = clients.filter(c => c.name.toLowerCase().includes(query) || (c.notes||'').toLowerCase().includes(query)).slice(0, 4);
+  const matchSlots    = slots.filter(s => { const c = clients.find(x => x.id === s.clientId); return c && c.name.toLowerCase().includes(query); }).slice(0, 4);
   const matchPayments = payments.filter(p =>
-    (p.notes || '').toLowerCase().includes(query) ||
+    (p.notes||'').toLowerCase().includes(query) ||
     (() => { const c = clients.find(x => x.id === p.clientId); return c && c.name.toLowerCase().includes(query); })()
   ).slice(0, 4);
 
-  const hasResults = matchClients.length + matchSlots.length + matchPayments.length > 0;
-
-  if (!hasResults) {
+  if (!matchClients.length && !matchSlots.length && !matchPayments.length) {
     results.innerHTML = `<div class="search-empty">Sin resultados para "<strong>${esc(q)}</strong>"</div>`;
     return;
   }
 
   let html = '';
-
   if (matchClients.length) {
     html += `<div class="search-group-header">Clientes</div>`;
     matchClients.forEach(c => {
-      const initials = c.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-      const meta = [c.phone, c.email].filter(Boolean).join(' · ') || (c.notes ? c.notes.slice(0, 40) : '—');
-      html += `<div class="search-result-item" tabindex="0"
-        onclick="openClientDetail('${c.id}'); _dismissSearch();"
-        onkeydown="if(event.key==='Enter'){openClientDetail('${c.id}');_dismissSearch();}">
+      const initials = c.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+      const meta = [c.phone, c.email].filter(Boolean).join(' · ') || (c.notes ? c.notes.slice(0,40) : '—');
+      html += `<div class="search-result-item" tabindex="0" onclick="openClientDetail('${c.id}'); _dismissSearch();" onkeydown="if(event.key==='Enter'){openClientDetail('${c.id}');_dismissSearch();}">
         <div class="search-result-icon">👤</div>
-        <div class="search-result-body">
-          <div class="search-result-name">${esc(c.name)}</div>
-          <div class="search-result-meta">${esc(meta)}</div>
-        </div>
+        <div class="search-result-body"><div class="search-result-name">${esc(c.name)}</div><div class="search-result-meta">${esc(meta)}</div></div>
       </div>`;
     });
   }
-
   if (matchSlots.length) {
     if (matchClients.length) html += `<div class="search-result-divider"></div>`;
     html += `<div class="search-group-header">Sesiones</div>`;
     matchSlots.forEach(s => {
-      const client  = clients.find(c => c.id === s.clientId);
-      const name    = client ? client.name : (s.title || 'Bloqueado');
-      const d       = toDate(s.date);
-      const dateStr = d.toLocaleDateString('es-ES', { weekday:'short', day:'numeric', month:'short' });
-      const timeStr = formatTime(d);
-      const stLabel = statusLabel(s.status || 'scheduled');
-      html += `<div class="search-result-item" tabindex="0"
-        onclick="navigate('calendario'); _dismissSearch();"
-        onkeydown="if(event.key==='Enter'){navigate('calendario');_dismissSearch();}">
+      const client = clients.find(c => c.id === s.clientId);
+      const name = client ? client.name : (s.title || 'Bloqueado');
+      const d = toDate(s.date);
+      html += `<div class="search-result-item" tabindex="0" onclick="navigate('calendario'); _dismissSearch();" onkeydown="if(event.key==='Enter'){navigate('calendario');_dismissSearch();}">
         <div class="search-result-icon">📅</div>
         <div class="search-result-body">
           <div class="search-result-name">${esc(name)}</div>
-          <div class="search-result-meta">${esc(dateStr)} · ${timeStr} · ${stLabel}</div>
+          <div class="search-result-meta">${d.toLocaleDateString('es-ES',{weekday:'short',day:'numeric',month:'short'})} · ${formatTime(d)} · ${statusLabel(s.status||'scheduled')}</div>
         </div>
       </div>`;
     });
   }
-
   if (matchPayments.length) {
     if (matchClients.length || matchSlots.length) html += `<div class="search-result-divider"></div>`;
     html += `<div class="search-group-header">Pagos</div>`;
     matchPayments.forEach(p => {
-      const client  = clients.find(c => c.id === p.clientId);
-      const name    = client ? client.name : 'Cliente desconocido';
-      const d       = toDate(p.date);
-      const dateStr = d.toLocaleDateString('es-ES', { day:'numeric', month:'short', year:'numeric' });
-      const notes   = p.notes ? ` — ${p.notes}` : '';
-      html += `<div class="search-result-item" tabindex="0"
-        onclick="navigate('pagos'); _dismissSearch();"
-        onkeydown="if(event.key==='Enter'){navigate('pagos');_dismissSearch();}">
+      const client = clients.find(c => c.id === p.clientId);
+      const name = client ? client.name : 'Cliente desconocido';
+      const d = toDate(p.date);
+      html += `<div class="search-result-item" tabindex="0" onclick="navigate('pagos'); _dismissSearch();" onkeydown="if(event.key==='Enter'){navigate('pagos');_dismissSearch();}">
         <div class="search-result-icon">💳</div>
         <div class="search-result-body">
-          <div class="search-result-name">${esc(name)} · ${(p.amount || 0).toFixed(0)}€</div>
-          <div class="search-result-meta">${esc(dateStr)}${esc(notes)}</div>
+          <div class="search-result-name">${esc(name)} · ${(p.amount||0).toFixed(0)}€</div>
+          <div class="search-result-meta">${d.toLocaleDateString('es-ES',{day:'numeric',month:'short',year:'numeric'})}${p.notes ? ' — '+esc(p.notes) : ''}</div>
         </div>
       </div>`;
     });
   }
-
   results.innerHTML = html;
 };
 
 // ═══════════════════════════════════════════════════════════
 //  EXPORT DROPDOWN
 // ═══════════════════════════════════════════════════════════
-
 window.toggleExportDropdown = function (e) {
   e.stopPropagation();
   const menu = document.getElementById('export-menu');
   if (!menu) return;
-  const isOpen = menu.classList.contains('open');
-  menu.classList.toggle('open', !isOpen);
+  menu.classList.toggle('open', !menu.classList.contains('open'));
 };
-
 window.closeExportDropdown = function () {
   const menu = document.getElementById('export-menu');
   if (menu) menu.classList.remove('open');
 };
-
 document.addEventListener('click', () => closeExportDropdown());
 
 // ═══════════════════════════════════════════════════════════
-//  EXPORT EXCEL (.xlsx) — SheetJS
+//  EXPORT EXCEL
 // ═══════════════════════════════════════════════════════════
 window.exportPaymentsXLSX = function () {
-  if (typeof XLSX === 'undefined') { alert('La librería Excel no está disponible aún. Recarga la página.'); return; }
-
-  const y = currentMonth.getFullYear();
-  const m = currentMonth.getMonth();
-  const monthPayments = payments.filter(p => {
-    const d = toDate(p.date);
-    return d.getFullYear() === y && d.getMonth() === m;
-  });
-
-  const toExport = selectedPaymentIds.size > 0
-    ? monthPayments.filter(p => selectedPaymentIds.has(p.id))
-    : monthPayments;
-
+  if (typeof XLSX === 'undefined') { alert('La librería Excel no está disponible. Recarga la página.'); return; }
+  const y = currentMonth.getFullYear(); const m = currentMonth.getMonth();
+  const monthPayments = payments.filter(p => { const d = toDate(p.date); return d.getFullYear() === y && d.getMonth() === m; });
+  const toExport = selectedPaymentIds.size > 0 ? monthPayments.filter(p => selectedPaymentIds.has(p.id)) : monthPayments;
   if (toExport.length === 0) { alert('No hay pagos para exportar'); return; }
-
-  const monthStr  = currentMonth.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
-  const total     = toExport.reduce((s, p) => s + (p.amount || 0), 0);
-
-  // Build rows
+  const total = toExport.reduce((s, p) => s + (p.amount || 0), 0);
   const headers = ['Fecha', 'Cliente', 'Concepto', 'Importe (€)', 'Notas'];
   const dataRows = toExport.map(p => {
     const client = clients.find(c => c.id === p.clientId);
-    return [
-      toDate(p.date).toLocaleDateString('es-ES'),
-      client ? client.name : 'Cliente desconocido',
-      conceptLabel(p.concept),
-      parseFloat((p.amount || 0).toFixed(2)),
-      p.notes || '',
-    ];
+    return [toDate(p.date).toLocaleDateString('es-ES'), client ? client.name : 'Desconocido', conceptLabel(p.concept), parseFloat((p.amount||0).toFixed(2)), p.notes || ''];
   });
-
-  // Totals row
-  const totalsRow = ['', '', 'TOTAL', parseFloat(total.toFixed(2)), ''];
-
-  const wsData = [headers, ...dataRows, totalsRow];
+  const wsData = [headers, ...dataRows, ['', '', 'TOTAL', parseFloat(total.toFixed(2)), '']];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-  // Column widths
-  ws['!cols'] = [
-    { wch: 12 }, // Fecha
-    { wch: 24 }, // Cliente
-    { wch: 22 }, // Concepto
-    { wch: 14 }, // Importe
-    { wch: 30 }, // Notas
-  ];
-
-  // Style header row (SheetJS CE supports limited styling via cell format)
-  const headerRange = XLSX.utils.decode_range(ws['!ref']);
-  for (let C = headerRange.s.c; C <= headerRange.e.c; C++) {
-    const addr = XLSX.utils.encode_cell({ r: 0, c: C });
-    if (!ws[addr]) continue;
-    ws[addr].s = { font: { bold: true } };
-  }
-
-  // Style totals row
-  const lastRow = wsData.length - 1;
-  ['A','B','C','D','E'].forEach(col => {
-    const addr = `${col}${lastRow + 1}`;
-    if (ws[addr]) ws[addr].s = { font: { bold: true } };
-  });
-
+  ws['!cols'] = [{wch:12},{wch:24},{wch:22},{wch:14},{wch:30}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Pagos');
-
-  const filename = `pagos-${String(m + 1).padStart(2,'0')}-${y}.xlsx`;
-  XLSX.writeFile(wb, filename);
+  XLSX.writeFile(wb, `pagos-${String(m+1).padStart(2,'0')}-${y}.xlsx`);
 };
 
 // ═══════════════════════════════════════════════════════════
-//  EXPORT PDF — jsPDF + autoTable
+//  EXPORT PDF
 // ═══════════════════════════════════════════════════════════
 window.exportPaymentsPDF = function () {
-  if (typeof window.jspdf === 'undefined') { alert('La librería PDF no está disponible aún. Recarga la página.'); return; }
-
+  if (typeof window.jspdf === 'undefined') { alert('La librería PDF no está disponible. Recarga la página.'); return; }
   const { jsPDF } = window.jspdf;
-
-  const y = currentMonth.getFullYear();
-  const m = currentMonth.getMonth();
-  const monthPayments = payments.filter(p => {
-    const d = toDate(p.date);
-    return d.getFullYear() === y && d.getMonth() === m;
-  });
-
-  const toExport = selectedPaymentIds.size > 0
-    ? monthPayments.filter(p => selectedPaymentIds.has(p.id))
-    : monthPayments;
-
+  const y = currentMonth.getFullYear(); const m = currentMonth.getMonth();
+  const monthPayments = payments.filter(p => { const d = toDate(p.date); return d.getFullYear() === y && d.getMonth() === m; });
+  const toExport = selectedPaymentIds.size > 0 ? monthPayments.filter(p => selectedPaymentIds.has(p.id)) : monthPayments;
   if (toExport.length === 0) { alert('No hay pagos para exportar'); return; }
-
-  const monthStr = currentMonth.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
-  const total    = toExport.reduce((s, p) => s + (p.amount || 0), 0);
-
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const pageW = doc.internal.pageSize.getWidth();
-
-  // ── Header ──────────────────────────────────────────────
-  doc.setFillColor(14, 15, 20); // --bg1 dark
-  doc.rect(0, 0, pageW, 38, 'F');
-
-  doc.setTextColor(232, 255, 71); // neon yellow
-  doc.setFontSize(20);
-  doc.setFont('helvetica', 'bold');
-  doc.text('⚡ FitTracker Pro', 14, 16);
-
-  doc.setTextColor(200, 205, 215);
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`Pagos — ${monthStr}`, 14, 25);
-
-  doc.setTextColor(232, 255, 71);
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.text(`Total: ${total.toFixed(2)} €`, pageW - 14, 25, { align: 'right' });
-
-  // ── Table ───────────────────────────────────────────────
+  const monthStr = currentMonth.toLocaleDateString('es-ES', { month:'long', year:'numeric' });
+  const total = toExport.reduce((s, p) => s + (p.amount || 0), 0);
+  const doc2 = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+  const pageW = doc2.internal.pageSize.getWidth();
+  doc2.setFillColor(14,15,20); doc2.rect(0,0,pageW,38,'F');
+  doc2.setTextColor(232,255,71); doc2.setFontSize(20); doc2.setFont('helvetica','bold'); doc2.text('⚡ FitTracker Pro', 14, 16);
+  doc2.setTextColor(200,205,215); doc2.setFontSize(11); doc2.setFont('helvetica','normal'); doc2.text(`Pagos — ${monthStr}`, 14, 25);
+  doc2.setTextColor(232,255,71); doc2.setFontSize(11); doc2.setFont('helvetica','bold'); doc2.text(`Total: ${total.toFixed(2)} €`, pageW-14, 25, {align:'right'});
   const tableRows = toExport.map(p => {
     const client = clients.find(c => c.id === p.clientId);
-    return [
-      toDate(p.date).toLocaleDateString('es-ES'),
-      client ? client.name : 'Cliente desconocido',
-      conceptLabel(p.concept),
-      `${(p.amount || 0).toFixed(2)} €`,
-      p.notes || '',
-    ];
+    return [toDate(p.date).toLocaleDateString('es-ES'), client ? client.name : 'Desconocido', conceptLabel(p.concept), `${(p.amount||0).toFixed(2)} €`, p.notes||''];
   });
-
-  doc.autoTable({
-    startY: 44,
-    head: [['Fecha', 'Cliente', 'Concepto', 'Importe (€)', 'Notas']],
-    body: tableRows,
-    foot: [['', '', 'TOTAL', `${total.toFixed(2)} €`, '']],
-    theme: 'grid',
-    headStyles: {
-      fillColor: [30, 33, 42],
-      textColor: [232, 255, 71],
-      fontStyle: 'bold',
-      fontSize: 9,
-    },
-    footStyles: {
-      fillColor: [30, 33, 42],
-      textColor: [232, 255, 71],
-      fontStyle: 'bold',
-      fontSize: 9,
-    },
-    bodyStyles: {
-      fontSize: 9,
-      textColor: [30, 33, 42],
-    },
-    alternateRowStyles: {
-      fillColor: [245, 247, 250],
-    },
-    columnStyles: {
-      0: { cellWidth: 24 },
-      1: { cellWidth: 44 },
-      2: { cellWidth: 38 },
-      3: { cellWidth: 26, halign: 'right' },
-      4: { cellWidth: 'auto' },
-    },
-    margin: { left: 14, right: 14 },
-    showFoot: 'lastPage',
+  doc2.autoTable({
+    startY: 44, head:[['Fecha','Cliente','Concepto','Importe (€)','Notas']], body: tableRows, foot:[['','','TOTAL',`${total.toFixed(2)} €`,'']],
+    theme:'grid',
+    headStyles:{fillColor:[30,33,42],textColor:[232,255,71],fontStyle:'bold',fontSize:9},
+    footStyles:{fillColor:[30,33,42],textColor:[232,255,71],fontStyle:'bold',fontSize:9},
+    bodyStyles:{fontSize:9,textColor:[30,33,42]},
+    alternateRowStyles:{fillColor:[245,247,250]},
+    columnStyles:{0:{cellWidth:24},1:{cellWidth:44},2:{cellWidth:38},3:{cellWidth:26,halign:'right'},4:{cellWidth:'auto'}},
+    margin:{left:14,right:14}, showFoot:'lastPage',
   });
-
-  // ── Footer ───────────────────────────────────────────────
-  const pageCount = doc.internal.getNumberOfPages();
-  const today     = new Date().toLocaleDateString('es-ES', { day:'numeric', month:'long', year:'numeric' });
+  const pageCount = doc2.internal.getNumberOfPages();
+  const today2 = new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'});
   for (let i = 1; i <= pageCount; i++) {
-    doc.setPage(i);
-    const pageH = doc.internal.pageSize.getHeight();
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(160, 165, 175);
-    doc.text(`Generado el ${today}`, 14, pageH - 8);
-    doc.text(`Página ${i} de ${pageCount}`, pageW - 14, pageH - 8, { align: 'right' });
+    doc2.setPage(i); const pageH = doc2.internal.pageSize.getHeight();
+    doc2.setFontSize(8); doc2.setFont('helvetica','normal'); doc2.setTextColor(160,165,175);
+    doc2.text(`Generado el ${today2}`, 14, pageH-8);
+    doc2.text(`Página ${i} de ${pageCount}`, pageW-14, pageH-8, {align:'right'});
   }
-
-  const filename = `pagos-${String(m + 1).padStart(2,'0')}-${y}.pdf`;
-  doc.save(filename);
+  doc2.save(`pagos-${String(m+1).padStart(2,'0')}-${y}.pdf`);
 };

@@ -14,9 +14,7 @@
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════
-     LOGIN
-═══════════════════════════════════════════ -->
+<!-- LOGIN -->
 <div id="page-login" class="page-login hidden">
   <div class="login-card">
     <div class="login-logo">
@@ -37,12 +35,10 @@
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════
-     APP SHELL
-═══════════════════════════════════════════ -->
+<!-- APP SHELL -->
 <div id="app" class="app hidden">
 
-  <!-- Top bar (mobile) -->
+  <!-- Top bar -->
   <header class="topbar">
     <div class="topbar-logo">
       <span class="logo-bolt">⚡</span>
@@ -50,24 +46,20 @@
     </div>
     <div class="topbar-right">
       <span id="topbar-badge" class="topbar-badge hidden"></span>
-      <button class="topbar-search-btn" onclick="openSearch()" aria-label="Buscar">
+      <button class="topbar-search-btn" onclick="openSearch()" aria-label="Buscar (Cmd+K)">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       </button>
       <button class="hamburger" onclick="toggleSidebar()" aria-label="Menú">☰</button>
     </div>
   </header>
 
-  <!-- Sidebar overlay -->
   <div id="sidebar-overlay" class="sidebar-overlay" onclick="closeSidebar()"></div>
 
   <!-- Sidebar -->
   <aside id="sidebar" class="sidebar">
     <div class="sidebar-logo">
       <span class="logo-bolt">⚡</span>
-      <div>
-        <span class="logo-name">FitTracker</span>
-        <span class="logo-sub">Pro</span>
-      </div>
+      <div><span class="logo-name">FitTracker</span><span class="logo-sub">Pro</span></div>
       <button class="sidebar-close" onclick="closeSidebar()">✕</button>
     </div>
     <nav class="sidebar-nav">
@@ -86,22 +78,19 @@
       </button>
     </nav>
     <div class="sidebar-footer">
-      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Cambiar modo de color" title="Modo claro / oscuro">
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Cambiar tema">
         <span class="nav-icon" id="theme-icon">☀️</span>
         <span class="nav-label" id="theme-label">Modo claro</span>
         <span class="theme-toggle-track"><span class="theme-toggle-thumb"></span></span>
       </button>
-      <!-- ── Notificaciones toggle ── -->
-      <button class="theme-toggle notif-toggle" id="notif-toggle-btn" onclick="toggleNotifications()" aria-label="Activar/desactivar notificaciones">
+      <button class="theme-toggle notif-toggle" id="notif-toggle-btn" onclick="toggleNotifications()" aria-label="Notificaciones">
         <span class="nav-icon" id="notif-icon">🔔</span>
         <span class="nav-label">Notificaciones</span>
         <span class="theme-toggle-track notif-toggle-track" id="notif-track">
           <span class="theme-toggle-thumb notif-toggle-thumb" id="notif-thumb"></span>
         </span>
       </button>
-
-      <!-- ── Notificaciones config collapsible ── -->
-      <button class="notif-config-trigger" id="notif-config-trigger" onclick="toggleNotifConfig()" aria-label="Configuración de notificaciones">
+      <button class="notif-config-trigger" id="notif-config-trigger" onclick="toggleNotifConfig()" aria-label="Config notificaciones">
         <span class="notif-config-trigger-label">⚙️ Configuración</span>
         <span class="notif-config-trigger-arrow" id="notif-config-arrow">▸</span>
       </button>
@@ -127,11 +116,11 @@
             <option value="5">≤ 5 sesiones</option>
           </select>
         </div>
-        <button class="notif-help-btn" onclick="openNotifHelp()">
-          ❓ Cómo activar en iPhone
-        </button>
+        <button class="notif-help-btn" onclick="openNotifHelp()">❓ Cómo activar en iPhone</button>
       </div>
-
+      <div class="sidebar-shortcuts-hint">
+        <span>⌨️ <kbd>N</kbd> nueva sesión · <kbd>⌘K</kbd> buscar</span>
+      </div>
       <button class="nav-item logout-btn" onclick="doLogout()">
         <span class="nav-icon">🚪</span><span class="nav-label">Salir</span>
       </button>
@@ -141,9 +130,8 @@
   <!-- Main content -->
   <main id="main-content" class="main-content">
 
-    <!-- ── DASHBOARD ── -->
+    <!-- DASHBOARD -->
     <div id="page-dashboard" class="page dash-page">
-      <!-- Hero -->
       <div class="dash-hero">
         <div class="dash-hero-left">
           <div class="dash-greeting" id="dash-greeting">Buenos días</div>
@@ -155,11 +143,7 @@
         </div>
         <div id="dash-alerts"></div>
       </div>
-
-      <!-- KPI row -->
       <div class="dash-kpi-row" id="dash-stats"></div>
-
-      <!-- Timeline sesiones hoy -->
       <div class="dash-section">
         <div class="dash-section-header">
           <span class="dash-section-label">Hoy</span>
@@ -167,8 +151,6 @@
         </div>
         <div id="dash-today"></div>
       </div>
-
-      <!-- Charts -->
       <div class="dash-section">
         <div class="dash-charts-row">
           <div class="dash-chart-wrap">
@@ -181,8 +163,6 @@
           </div>
         </div>
       </div>
-
-      <!-- Bonos rings -->
       <div class="dash-section">
         <div class="dash-section-header">
           <span class="dash-section-label">Bonos</span>
@@ -192,7 +172,7 @@
       </div>
     </div>
 
-    <!-- ── CLIENTES ── -->
+    <!-- CLIENTES -->
     <div id="page-clientes" class="page hidden">
       <div class="page-header page-header--hero">
         <span class="ph-eyebrow">Gestión</span>
@@ -212,7 +192,7 @@
       <div id="clients-grid" class="clients-grid"></div>
     </div>
 
-    <!-- ── CALENDARIO ── -->
+    <!-- CALENDARIO -->
     <div id="page-calendario" class="page hidden">
       <div class="page-header page-header--hero">
         <span class="ph-eyebrow">Semana</span>
@@ -229,22 +209,20 @@
       <div class="calendar-wrapper" style="margin-top:24px">
         <div id="calendar-grid" class="calendar-grid"></div>
       </div>
-      <!-- Weekend toggle -->
       <div class="weekend-toggle-row">
         <button id="toggle-weekend-btn" class="btn btn-sm btn-outline weekend-btn" onclick="toggleWeekend()">Ver fin de semana →</button>
       </div>
-      <!-- Legend -->
       <div class="cal-legend">
         <div class="cal-legend-item"><div class="cal-legend-dot ld-scheduled"></div> Programada</div>
         <div class="cal-legend-item"><div class="cal-legend-dot ld-completed"></div> Completada</div>
         <div class="cal-legend-item"><div class="cal-legend-dot ld-pending"></div> Pendiente confirmación</div>
         <div class="cal-legend-item"><div class="cal-legend-dot ld-cancelled"></div> Cancelada</div>
+        <div class="cal-legend-item"><span style="font-size:11px">🔁</span> Repetida</div>
       </div>
-      <!-- Week summary -->
       <div id="week-summary" class="week-summary"></div>
     </div>
 
-    <!-- ── PAGOS ── -->
+    <!-- PAGOS -->
     <div id="page-pagos" class="page hidden">
       <div class="page-header page-header--hero">
         <span class="ph-eyebrow">Facturación</span>
@@ -261,12 +239,12 @@
       <div id="payments-list" class="payments-list"></div>
     </div>
 
-    <!-- ── DETALLE CLIENTE ── -->
+    <!-- DETALLE CLIENTE -->
     <div id="page-client-detail" class="page hidden"></div>
 
   </main>
 
-  <!-- Bottom nav (phones) -->
+  <!-- Bottom nav -->
   <nav class="bottom-nav">
     <button class="bottom-nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
       <span class="nav-icon">🏠</span><span>Dashboard</span>
@@ -348,17 +326,19 @@
   </div>
 </div>
 
-<!-- Modal Sesión (Calendario) -->
+<!-- Modal Sesión -->
 <div id="modal-slot" class="modal-overlay hidden" onclick="closeModalSlot(event)">
   <div class="modal">
     <div class="modal-header">
       <h2 id="modal-slot-title">Nueva Sesión</h2>
-      <button class="close-btn" onclick="closeModalSlot()">✕</button>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="series-info" class="series-info-badge" style="display:none"></span>
+        <button class="close-btn" onclick="closeModalSlot()">✕</button>
+      </div>
     </div>
     <div class="modal-body">
       <input type="hidden" id="slot-id" />
 
-      <!-- Tipo -->
       <div class="form-group">
         <label>Tipo</label>
         <select id="s-type" onchange="toggleSlotFields()">
@@ -368,19 +348,16 @@
         </select>
       </div>
 
-      <!-- Cliente (solo si tipo=client) -->
       <div class="form-group" id="slot-client-group">
         <label>Cliente</label>
         <select id="s-client"></select>
       </div>
 
-      <!-- Título (tipo != client) -->
       <div class="form-group hidden" id="slot-title-group">
         <label>Título</label>
         <input id="s-title" placeholder="Ej: Reunión..." />
       </div>
 
-      <!-- Fecha / Hora / Duración -->
       <div class="form-row">
         <div class="form-group">
           <label>Fecha</label>
@@ -406,10 +383,9 @@
         </div>
       </div>
 
-      <!-- Estado (solo al editar) -->
       <div class="form-group" id="slot-status-group" style="display:none">
         <label>Estado</label>
-        <select id="s-status" onchange="updateStatusPreview()">
+        <select id="s-status">
           <option value="scheduled">✅ Programada</option>
           <option value="pending">⏳ Pendiente confirmación</option>
           <option value="cancelled">❌ Cancelada</option>
@@ -417,13 +393,12 @@
         </select>
       </div>
 
-      <!-- Notas -->
       <div class="form-group">
         <label>Notas</label>
         <input id="s-notes" placeholder="Observaciones..." />
       </div>
 
-      <!-- ── REPETICIÓN (solo nueva sesión) ── -->
+      <!-- REPETICIÓN (solo nueva sesión) -->
       <div id="repeat-section">
         <div class="form-group" style="margin-bottom:8px">
           <label class="checkbox-label">
@@ -445,24 +420,16 @@
             </div>
           </div>
           <div class="form-group">
-            <label>Total de sesiones</label>
-            <select id="s-weeks" onchange="updateRepeatPreview()">
-              <option value="4">4 sesiones</option>
-              <option value="6">6 sesiones</option>
-              <option value="8">8 sesiones</option>
-              <option value="10">10 sesiones</option>
-              <option value="12" selected>12 sesiones</option>
-              <option value="16">16 sesiones</option>
-              <option value="20">20 sesiones</option>
-              <option value="24">24 sesiones</option>
-            </select>
+            <label>Número de sesiones en total</label>
+            <input type="number" id="s-repeat-count" value="12" min="1" max="200"
+              placeholder="Ej: 12" oninput="updateRepeatPreview()"
+              style="max-width:120px" />
             <small id="repeat-preview" style="color:var(--text2);font-size:11px;margin-top:4px;display:block"></small>
           </div>
         </div>
       </div>
 
-    </div><!-- /modal-body -->
-
+    </div>
     <div class="modal-footer">
       <button id="btn-delete-slot" class="btn btn-danger btn-sm hidden" onclick="deleteSlot()">🗑️ Eliminar</button>
       <button id="btn-complete-slot" class="btn btn-success btn-sm hidden" onclick="completeSlot()">☑️ Completar</button>
@@ -523,9 +490,43 @@
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════
-     GLOBAL SEARCH MODAL
-═══════════════════════════════════════════ -->
+<!-- Modal Acción Recurrente (editar/eliminar serie) -->
+<div id="modal-recur-action" class="modal-overlay hidden">
+  <div class="modal modal--compact">
+    <div class="modal-header">
+      <h2 id="recur-modal-title">Editar sesión repetida</h2>
+      <button class="close-btn" onclick="closeRecurModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="color:var(--text2);margin-bottom:16px;font-size:14px">Esta sesión pertenece a una serie. ¿A qué sesiones quieres aplicar el cambio?</p>
+      <div class="recur-options">
+        <button class="recur-option-btn" onclick="recurSelectThis()">
+          <span class="recur-opt-icon">1️⃣</span>
+          <div>
+            <div class="recur-opt-title">Solo esta sesión</div>
+            <div class="recur-opt-desc">Las demás no cambian</div>
+          </div>
+        </button>
+        <button class="recur-option-btn" onclick="recurSelectFuture()">
+          <span class="recur-opt-icon">➡️</span>
+          <div>
+            <div class="recur-opt-title">Esta y las siguientes</div>
+            <div class="recur-opt-desc">Desde esta fecha en adelante</div>
+          </div>
+        </button>
+        <button class="recur-option-btn" onclick="recurSelectAll()">
+          <span class="recur-opt-icon">🔁</span>
+          <div>
+            <div class="recur-opt-title">Toda la serie</div>
+            <div class="recur-opt-desc">Todas las sesiones del grupo</div>
+          </div>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Global Search -->
 <div id="search-overlay" class="search-overlay hidden" onclick="closeSearch(event)">
   <div class="search-modal" role="dialog" aria-label="Búsqueda global">
     <div class="search-input-wrap">
@@ -537,9 +538,7 @@
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════
-     MODAL AYUDA NOTIFICACIONES
-═══════════════════════════════════════════ -->
+<!-- Modal Ayuda Notificaciones -->
 <div id="modal-notif-help" class="modal-overlay hidden" onclick="closeNotifHelp(event)">
   <div class="modal" style="max-width:480px">
     <div class="modal-header">
@@ -548,48 +547,31 @@
     </div>
     <div class="modal-body">
       <div class="notif-help-steps">
-
         <div class="notif-help-section">
           <div class="notif-help-section-title">Requisito previo</div>
-          <div class="notif-help-note">
-            Safari en iOS 16.4+ soporta notificaciones <strong>solo si la app está instalada</strong> en pantalla de inicio. No funcionan abriendo la web desde Safari directamente.
-          </div>
+          <div class="notif-help-note">Safari en iOS 16.4+ soporta notificaciones <strong>solo si la app está instalada</strong> en pantalla de inicio.</div>
         </div>
-
         <div class="notif-help-section">
           <div class="notif-help-section-title">Paso 1 — Instalar la app</div>
           <ol class="notif-help-list">
             <li>Abre Safari y ve a <strong>fittracker-pro</strong></li>
-            <li>Pulsa el botón <strong>Compartir</strong> <span class="notif-help-icon">⬆️</span> (barra inferior)</li>
+            <li>Pulsa el botón <strong>Compartir</strong> ⬆️</li>
             <li>Toca <strong>"Añadir a pantalla de inicio"</strong></li>
             <li>Confirma con <strong>"Añadir"</strong></li>
           </ol>
         </div>
-
         <div class="notif-help-section">
           <div class="notif-help-section-title">Paso 2 — Activar notificaciones</div>
           <ol class="notif-help-list">
-            <li>Abre la app <strong>desde el icono del escritorio</strong> (no desde Safari)</li>
-            <li>El sistema pedirá permiso de notificaciones — toca <strong>"Permitir"</strong></li>
-            <li>Activa el toggle de notificaciones en el menú lateral</li>
+            <li>Abre la app <strong>desde el icono del escritorio</strong></li>
+            <li>El sistema pedirá permiso — toca <strong>"Permitir"</strong></li>
+            <li>Activa el toggle en el menú lateral</li>
           </ol>
         </div>
-
-        <div class="notif-help-section">
-          <div class="notif-help-section-title">Si no aparece el permiso</div>
-          <ol class="notif-help-list">
-            <li>Ve a <strong>Ajustes del iPhone → FitTracker Pro</strong></li>
-            <li>Activa <strong>"Notificaciones"</strong></li>
-          </ol>
-        </div>
-
         <div class="notif-help-section">
           <div class="notif-help-section-title">⚠️ Limitaciones importantes</div>
-          <div class="notif-help-note notif-help-note--warn">
-            Los recordatorios de sesiones solo funcionan si el iPhone está encendido y la app fue abierta ese día. Apple no permite notificaciones en background real para PWAs. Las alertas de bonos aparecen siempre al abrir la app.
-          </div>
+          <div class="notif-help-note notif-help-note--warn">Los recordatorios solo funcionan si el iPhone está encendido y la app fue abierta ese día.</div>
         </div>
-
       </div>
     </div>
     <div class="modal-footer">
@@ -598,37 +580,31 @@
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════
-     FIREBASE + APP JS
-═══════════════════════════════════════════ -->
+<!-- Firebase + App -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.6.0/jspdf.plugin.autotable.min.js"></script>
 <script src="firebase-config.js"></script>
 <script type="module" src="app.js"></script>
-<!-- Calendar event tooltip -->
+
+<!-- Calendar tooltip -->
 <div id="cal-tooltip" role="tooltip" aria-hidden="true"></div>
 <script>
   (function() {
     const tip = document.getElementById('cal-tooltip');
-    const statusClass = {
-      'Programada': 's-scheduled',
-      'Completada': 's-completed',
-      'Pendiente confirmación': 's-pending',
-      'Cancelada': 's-cancelled'
-    };
+    const statusClass = { 'Programada':'s-scheduled','Completada':'s-completed','Pendiente confirmación':'s-pending','Cancelada':'s-cancelled' };
     let hideTimer;
-
     function showTooltip(el, e) {
       clearTimeout(hideTimer);
       const name   = el.dataset.tooltipName   || '';
       const time   = el.dataset.tooltipTime   || '';
       const dur    = el.dataset.tooltipDur    || '';
       const status = el.dataset.tooltipStatus || '';
+      const isRepeat = el.dataset.tooltipRepeat === 'true';
       const sCls   = statusClass[status] || 's-scheduled';
       tip.innerHTML = `
-        <div class="tt-name">${name}</div>
+        <div class="tt-name">${name}${isRepeat ? ' <span class="tt-repeat">🔁</span>' : ''}</div>
         <div class="tt-row"><span>🕐</span><span>${time}</span></div>
         <div class="tt-row"><span>⏱</span><span>${dur}</span></div>
         <span class="tt-status ${sCls}">${status}</span>`;
@@ -636,37 +612,19 @@
       tip.classList.add('visible');
       tip.setAttribute('aria-hidden', 'false');
     }
-
     function positionTooltip(e) {
-      const margin = 12;
-      const tw = tip.offsetWidth || 200;
-      const th = tip.offsetHeight || 100;
-      let x = e.clientX + margin;
-      let y = e.clientY + margin;
+      const margin = 12; const tw = tip.offsetWidth || 200; const th = tip.offsetHeight || 100;
+      let x = e.clientX + margin; let y = e.clientY + margin;
       if (x + tw > window.innerWidth  - margin) x = e.clientX - tw - margin;
       if (y + th > window.innerHeight - margin) y = e.clientY - th - margin;
-      tip.style.left = x + 'px';
-      tip.style.top  = y + 'px';
+      tip.style.left = x + 'px'; tip.style.top = y + 'px';
     }
-
     function hideTooltip() {
-      hideTimer = setTimeout(() => {
-        tip.classList.remove('visible');
-        tip.setAttribute('aria-hidden', 'true');
-      }, 80);
+      hideTimer = setTimeout(() => { tip.classList.remove('visible'); tip.setAttribute('aria-hidden','true'); }, 80);
     }
-
-    document.addEventListener('mouseover', e => {
-      const el = e.target.closest('[data-tooltip-name]');
-      if (el) showTooltip(el, e);
-      else if (!tip.contains(e.target)) hideTooltip();
-    });
-    document.addEventListener('mousemove', e => {
-      if (tip.classList.contains('visible')) positionTooltip(e);
-    });
-    document.addEventListener('mouseout', e => {
-      if (!e.relatedTarget?.closest('[data-tooltip-name]')) hideTooltip();
-    });
+    document.addEventListener('mouseover', e => { const el = e.target.closest('[data-tooltip-name]'); if (el) showTooltip(el, e); else if (!tip.contains(e.target)) hideTooltip(); });
+    document.addEventListener('mousemove', e => { if (tip.classList.contains('visible')) positionTooltip(e); });
+    document.addEventListener('mouseout',  e => { if (!e.relatedTarget?.closest('[data-tooltip-name]')) hideTooltip(); });
     document.addEventListener('click', hideTooltip);
     document.addEventListener('scroll', hideTooltip, true);
   })();
