@@ -243,6 +243,7 @@
             <button class="btn btn-outline btn-sm" onclick="changeMonth(-1)">← Ant</button>
             <span id="month-label" class="month-label"></span>
             <button class="btn btn-outline btn-sm" onclick="changeMonth(1)">Sig →</button>
+            <button class="btn btn-outline btn-sm" id="btn-month-today" onclick="goToCurrentMonth()" style="display:none">Hoy</button>
           </div>
         </div>
       </div>
@@ -477,9 +478,10 @@
         <div class="form-group">
           <label>Concepto</label>
           <select id="p-concept">
-            <option value="bono">Bono de sesiones</option>
+            <option value="bono">Bono individual</option>
+            <option value="bono_pareja">Bono pareja</option>
+            <option value="sesion">Sesión suelta</option>
             <option value="mensual">Mensualidad</option>
-            <option value="individual">Sesión individual</option>
             <option value="otro">Otro</option>
           </select>
         </div>

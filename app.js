@@ -1600,6 +1600,15 @@ window.closeModalSlot = function (e) {
 window.changeMonth = function (dir) {
   currentMonth = new Date(currentMonth);
   currentMonth.setMonth(currentMonth.getMonth() + dir);
+  pagoSearchQuery = '';
+  pagoConceptFilter = 'all';
+  renderPagos();
+};
+
+window.goToCurrentMonth = function () {
+  currentMonth = new Date();
+  pagoSearchQuery = '';
+  pagoConceptFilter = 'all';
   renderPagos();
 };
 
@@ -1618,7 +1627,11 @@ function togglePaymentSelection(e, id) {
   if (selectedPaymentIds.has(id)) { selectedPaymentIds.delete(id); }
   else { selectedPaymentIds.add(id); }
   const row = document.querySelector(`.payment-row[data-id="${id}"]`);
-  if (row) row.classList.toggle('selected', selectedPaymentIds.has(id));
+  if (row) {
+    row.classList.toggle('selected', selectedPaymentIds.has(id));
+    const cb = row.querySelector('.payment-checkbox');
+    if (cb) cb.checked = selectedPaymentIds.has(id);
+  }
   updateSelectionBadge();
 }
 
@@ -1632,7 +1645,7 @@ window.exportPaymentsCSV = function () {
     const client = clients.find(c => c.id === p.clientId);
     const name = client ? client.name : 'Cliente desconocido';
     const d = toDate(p.date).toLocaleDateString('es-ES');
-    return `"${d}","${name}","${conceptLabel(p.concept)}","${(p.amount||0).toFixed(2)}","${p.concept === 'bono' ? (p.sessions||0) : ''}","${(p.notes||'').replace(/"/g,'""')}"`;
+    return `"${d}","${name}","${conceptLabel(p.concept)}","${(p.amount||0).toFixed(2)}","${conceptIsBonoType(p.concept) ? (p.sessions||0) : ''}","${(p.notes||'').replace(/"/g,'""')}"`;
   });
   const monthStr = currentMonth.toLocaleDateString('es-ES', { month:'long', year:'numeric' });
   const blob = new Blob(['\uFEFF' + [headers.join(','), ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -1641,65 +1654,150 @@ window.exportPaymentsCSV = function () {
   document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 };
 
+// ── Estado de filtros de pagos ────────────────────────────
+let pagoSearchQuery = '';
+let pagoConceptFilter = 'all';
+
+window.setPagoSearch = function(v) { pagoSearchQuery = v.toLowerCase(); renderPagosList(); };
+window.setPagoConceptFilter = function(v) { pagoConceptFilter = v; renderPagosList(); };
+
+function buildRevenueChart() {
+  const now = new Date();
+  const months = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push({ y: d.getFullYear(), m: d.getMonth(), label: d.toLocaleDateString('es-ES', { month:'short' }) });
+  }
+  const totals = months.map(({ y, m }) =>
+    payments.filter(p => { const d = toDate(p.date); return d.getFullYear() === y && d.getMonth() === m; })
+      .reduce((s, p) => s + (p.amount || 0), 0)
+  );
+  const maxVal = Math.max(...totals, 1);
+  const W = 560; const H = 90; const PL = 8; const PR = 8; const PT = 10; const PB = 28;
+  const barW = Math.floor((W - PL - PR) / months.length);
+  const chartW = barW * months.length;
+  const bars = months.map(({ label }, i) => {
+    const v = totals[i];
+    const barH = Math.max(3, ((v / maxVal) * (H - PT - PB)));
+    const x = PL + i * barW;
+    const y = H - PB - barH;
+    const isCurrent = months[i].y === now.getFullYear() && months[i].m === now.getMonth();
+    return `
+      <rect x="${x + 4}" y="${y}" width="${barW - 8}" height="${barH}" rx="4"
+        fill="${isCurrent ? 'var(--primary)' : 'var(--bg3)'}" opacity="${isCurrent ? 1 : 0.7}" />
+      <text x="${x + barW/2}" y="${H - PB + 14}" text-anchor="middle" font-size="10" fill="var(--text3)" font-family="Syne,sans-serif">${label}</text>
+      ${v > 0 ? `<text x="${x + barW/2}" y="${y - 4}" text-anchor="middle" font-size="9" fill="${isCurrent ? 'var(--primary)' : 'var(--text2)'}" font-family="JetBrains Mono,monospace">${v.toFixed(0)}€</text>` : ''}
+    `;
+  }).join('');
+  return `<div class="revenue-chart-wrap">
+    <div class="revenue-chart-title">Ingresos últimos 6 meses</div>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" xmlns="http://www.w3.org/2000/svg">${bars}</svg>
+  </div>`;
+}
+
+function renderPagosList() {
+  const y = currentMonth.getFullYear(); const m = currentMonth.getMonth();
+  const monthPayments = payments.filter(p => { const d = toDate(p.date); return d.getFullYear() === y && d.getMonth() === m; });
+
+  let filtered = monthPayments;
+  if (pagoConceptFilter !== 'all') filtered = filtered.filter(p => p.concept === pagoConceptFilter);
+  if (pagoSearchQuery) filtered = filtered.filter(p => {
+    const client = clients.find(c => c.id === p.clientId);
+    return (client?.name || '').toLowerCase().includes(pagoSearchQuery);
+  });
+
+  const listEl = $('payments-list-inner');
+  if (!listEl) return;
+  if (filtered.length === 0) {
+    listEl.innerHTML = `<div class="empty-state"><span>💳</span><p>${monthPayments.length === 0 ? 'Sin pagos este mes' : 'Sin resultados para ese filtro'}</p></div>`;
+    return;
+  }
+  listEl.innerHTML = filtered.map(p => {
+    const client = clients.find(c => c.id === p.clientId);
+    const name = client ? client.name : 'Cliente desconocido';
+    const color = client ? avatarColor(client.name) : '#888';
+    const initials = name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
+    const d = toDate(p.date);
+    const isSelected = selectedPaymentIds.has(p.id);
+    const conceptClass = { bono:'tag-bono', bono_pareja:'tag-bono-pareja', sesion:'tag-sesion', mensual:'tag-mensual', individual:'tag-individual', otro:'tag-otro' }[p.concept] || 'tag-otro';
+    return `<div class="payment-row${isSelected ? ' selected' : ''}" data-id="${p.id}" onclick="openPaymentModal('${p.id}')">
+      <div class="payment-checkbox-wrap" onclick="togglePaymentSelection(event, '${p.id}')">
+        <input type="checkbox" class="payment-checkbox" ${isSelected ? 'checked' : ''} tabindex="-1" />
+      </div>
+      <div class="payment-avatar" style="background:${color}">${initials}</div>
+      <div class="payment-info">
+        <strong>${esc(name)}</strong>
+        <span class="payment-concept-row"><span class="tag ${conceptClass}">${conceptLabel(p.concept)}</span>${p.notes ? `<span class="payment-notes">${esc(p.notes)}</span>` : ''}</span>
+      </div>
+      <div class="payment-date">${d.toLocaleDateString('es-ES', { day:'numeric', month:'short' })}</div>
+      <div class="payment-amount">+${(p.amount || 0).toFixed(0)}€</div>
+    </div>`;
+  }).join('');
+}
+
 function renderPagos() {
   if (!dataLoaded.clients || !dataLoaded.payments) return;
   const y = currentMonth.getFullYear(); const m = currentMonth.getMonth();
+  const now = new Date();
+  const isCurrentMonth = y === now.getFullYear() && m === now.getMonth();
+
   $('month-label').textContent = currentMonth.toLocaleDateString('es-ES', { month:'long', year:'numeric' });
+  const todayBtn = $('btn-month-today');
+  if (todayBtn) todayBtn.style.display = isCurrentMonth ? 'none' : '';
+
   selectedPaymentIds.clear();
 
   const monthPayments = payments.filter(p => { const d = toDate(p.date); return d.getFullYear() === y && d.getMonth() === m; });
   const total = monthPayments.reduce((s, p) => s + (p.amount || 0), 0);
-  const numBonos = monthPayments.filter(p => p.concept === 'bono').length;
-  const numOthers = monthPayments.filter(p => p.concept !== 'bono').length;
+  const numBonos = monthPayments.filter(p => conceptIsBonoType(p.concept)).length;
+
+  // Clientes sin pagar: activos con bono, sin pago de bono este mes y sessionsLeft <= 0
+  const clientsConBonoSinPago = clients.filter(c => {
+    if (!c.active || c.paymentType !== 'bono') return false;
+    const hasPagoMes = monthPayments.some(p => p.clientId === c.id && conceptIsBonoType(p.concept));
+    return !hasPagoMes && (c.sessionsLeft || 0) <= 0;
+  }).length;
 
   $('payments-summary').innerHTML = `
     <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-value">${total.toFixed(0)}€</div><div class="stat-label">Total del mes</div></div>
     <div class="stat-card"><div class="stat-icon">📦</div><div class="stat-value">${numBonos}</div><div class="stat-label">Bonos renovados</div></div>
     <div class="stat-card"><div class="stat-icon">🧾</div><div class="stat-value">${monthPayments.length}</div><div class="stat-label">Pagos totales</div></div>
-    <div class="stat-card"><div class="stat-icon">📋</div><div class="stat-value">${numOthers}</div><div class="stat-label">Otros pagos</div></div>
+    <div class="stat-card ${clientsConBonoSinPago > 0 ? 'stat-card--alert' : ''}"><div class="stat-icon">${clientsConBonoSinPago > 0 ? '⚠️' : '✅'}</div><div class="stat-value">${clientsConBonoSinPago}</div><div class="stat-label">Sin pagar bono</div></div>
   `;
 
   const listEl = $('payments-list');
-  let html = `<div class="payments-toolbar">
-    <div class="payments-toolbar-left">
-      <button class="btn btn-primary btn-sm" onclick="openPaymentModal()">+ Registrar pago</button>
-      <span class="selection-badge" id="selection-badge"></span>
-    </div>
-    <div class="payments-toolbar-right">
-      <div class="export-dropdown" id="export-dropdown">
-        <button class="btn btn-outline btn-sm btn-export" onclick="toggleExportDropdown(event)">⬇️ Exportar <span class="export-caret">▾</span></button>
-        <div class="export-menu" id="export-menu">
-          <button class="export-menu-item" onclick="exportPaymentsCSV(); closeExportDropdown()"><span>📄</span> CSV</button>
-          <button class="export-menu-item" onclick="exportPaymentsXLSX(); closeExportDropdown()"><span>📊</span> Excel (.xlsx)</button>
-          <button class="export-menu-item" onclick="exportPaymentsPDF(); closeExportDropdown()"><span>📋</span> PDF</button>
+  listEl.innerHTML = `
+    ${buildRevenueChart()}
+    <div class="payments-toolbar">
+      <div class="payments-toolbar-left">
+        <button class="btn btn-primary btn-sm" onclick="openPaymentModal()">+ Registrar pago</button>
+        <span class="selection-badge" id="selection-badge"></span>
+      </div>
+      <div class="payments-toolbar-right">
+        <div class="export-dropdown" id="export-dropdown">
+          <button class="btn btn-outline btn-sm btn-export" onclick="toggleExportDropdown(event)">⬇️ Exportar <span class="export-caret">▾</span></button>
+          <div class="export-menu" id="export-menu">
+            <button class="export-menu-item" onclick="exportPaymentsCSV(); closeExportDropdown()"><span>📄</span> CSV</button>
+            <button class="export-menu-item" onclick="exportPaymentsXLSX(); closeExportDropdown()"><span>📊</span> Excel (.xlsx)</button>
+            <button class="export-menu-item" onclick="exportPaymentsPDF(); closeExportDropdown()"><span>📋</span> PDF</button>
+          </div>
         </div>
       </div>
     </div>
-  </div>`;
-
-  if (monthPayments.length === 0) {
-    html += `<div class="empty-state"><span>💳</span><p>Sin pagos este mes</p></div>`;
-  } else {
-    html += monthPayments.map(p => {
-      const client = clients.find(c => c.id === p.clientId);
-      const name = client ? client.name : 'Cliente desconocido';
-      const d = toDate(p.date);
-      const isSelected = selectedPaymentIds.has(p.id);
-      return `<div class="payment-row${isSelected ? ' selected' : ''}" data-id="${p.id}" onclick="openPaymentModal('${p.id}')">
-        <div class="payment-checkbox-wrap" onclick="togglePaymentSelection(event, '${p.id}')">
-          <input type="checkbox" class="payment-checkbox" ${isSelected ? 'checked' : ''} tabindex="-1" />
-        </div>
-        <div class="payment-icon">💳</div>
-        <div class="payment-info">
-          <strong>${esc(name)}</strong>
-          <span>${conceptLabel(p.concept)}${p.notes ? ' — ' + esc(p.notes) : ''}</span>
-        </div>
-        <div class="payment-date">${d.toLocaleDateString('es-ES', { day:'numeric', month:'short' })}</div>
-        <div class="payment-amount">+${(p.amount || 0).toFixed(0)}€</div>
-      </div>`;
-    }).join('');
-  }
-  listEl.innerHTML = html;
+    <div class="pagos-filters">
+      <div class="pagos-search-wrap">
+        <input class="pagos-search" placeholder="🔍 Buscar cliente..." oninput="setPagoSearch(this.value)" value="${pagoSearchQuery}" />
+      </div>
+      <div class="concept-filter-pills" id="concept-filter-pills">
+        ${['all','bono','bono_pareja','sesion','mensual','otro'].map(v => {
+          const label = { all:'Todos', bono:'Bono individual', bono_pareja:'Bono pareja', sesion:'Sesión suelta', mensual:'Mensual', otro:'Otro' }[v];
+          return `<button class="concept-pill${pagoConceptFilter === v ? ' active' : ''}" onclick="setPagoConceptFilter('${v}')">${label}</button>`;
+        }).join('')}
+      </div>
+    </div>
+    <div id="payments-list-inner"></div>
+  `;
+  renderPagosList();
 }
 
 // ── Payment Modal ─────────────────────────────────────────
@@ -1720,7 +1818,7 @@ window.openPaymentModal = function (id) {
 };
 
 function togglePBonoGroup() {
-  const isBono = $('p-concept').value === 'bono';
+  const isBono = conceptIsBonoType($('p-concept').value);
   toggleClass('p-bono-group', 'hidden', !isBono);
 }
 document.getElementById('p-concept').addEventListener('change', togglePBonoGroup);
@@ -1737,7 +1835,7 @@ window.savePayment = async function () {
   const sessions = parseInt($('p-sessions').value) || 10;
   const data = {
     clientId, amount, date: Timestamp.fromDate(new Date(y, m-1, d)),
-    concept, sessions: concept === 'bono' ? sessions : 0,
+    concept, sessions: conceptIsBonoType(concept) ? sessions : 0,
     notes: $('p-notes').value.trim(), updatedAt: Timestamp.now(),
   };
   if (editingPayment) {
@@ -1745,11 +1843,10 @@ window.savePayment = async function () {
   } else {
     data.createdAt = Timestamp.now();
     await addDoc(collection(db, 'payments'), data);
-    if (concept === 'bono') {
-      const client = clients.find(c => c.id === clientId);
+    const client = clients.find(c => c.id === clientId);
+    if (conceptIsBonoType(concept)) {
       if (client) await updateDoc(doc(db, 'clients', clientId), { sessionsLeft: (client.sessionsLeft || 0) + sessions, bonoSize: sessions, totalPaid: (client.totalPaid || 0) + amount });
     } else {
-      const client = clients.find(c => c.id === clientId);
       if (client) await updateDoc(doc(db, 'clients', clientId), { totalPaid: (client.totalPaid || 0) + amount });
     }
   }
@@ -1760,7 +1857,19 @@ window.savePayment = async function () {
 window.deletePayment = async function () {
   if (!editingPayment) return;
   if (!confirm('¿Eliminar este pago?')) return;
-  await deleteDoc(doc(db, 'payments', editingPayment.id));
+  const p = editingPayment;
+  await deleteDoc(doc(db, 'payments', p.id));
+  // Si era un bono, restar las sesiones añadidas al cliente
+  if (conceptIsBonoType(p.concept) && p.sessions > 0) {
+    const client = clients.find(c => c.id === p.clientId);
+    if (client) {
+      const newLeft = Math.max(0, (client.sessionsLeft || 0) - p.sessions);
+      await updateDoc(doc(db, 'clients', p.clientId), { sessionsLeft: newLeft, totalPaid: Math.max(0, (client.totalPaid || 0) - (p.amount || 0)) });
+    }
+  } else {
+    const client = clients.find(c => c.id === p.clientId);
+    if (client) await updateDoc(doc(db, 'clients', p.clientId), { totalPaid: Math.max(0, (client.totalPaid || 0) - (p.amount || 0)) });
+  }
   closeModalPayment();
   showToast('🗑️ Pago eliminado', 'info');
 };
@@ -1799,7 +1908,8 @@ function isThisWeek(d)  { const ws = getWeekStart(new Date()); const we = new Da
 function formatTime(d)  { return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
 function toDateInput(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function payLabel(t)    { return { bono:'Bono', mensual:'Mensual', individual:'Individual' }[t] || t || 'Bono'; }
-function conceptLabel(t){ return { bono:'Renovación de bono', mensual:'Mensualidad', individual:'Sesión individual', otro:'Otro' }[t] || t || '—'; }
+function conceptLabel(t){ return { bono:'Bono individual', bono_pareja:'Bono pareja', sesion:'Sesión suelta', mensual:'Mensualidad', individual:'Sesión individual', otro:'Otro' }[t] || t || '—'; }
+function conceptIsBonoType(t) { return t === 'bono' || t === 'bono_pareja'; }
 function showError(id, msg) { const el=$(id); if(el){el.textContent=msg; el.classList.remove('hidden');} }
 function statusIcon(status) { return { scheduled:'⏳', completed:'✅', pending:'🔶', cancelled:'❌' }[status] || '⏳'; }
 function statusLabel(status) { return { scheduled:'Programada', completed:'Completada', pending:'Pendiente confirmación', cancelled:'Cancelada' }[status] || 'Programada'; }
