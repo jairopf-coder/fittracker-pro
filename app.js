@@ -476,17 +476,6 @@ window.openClientDetail = function (id) {
   const inactiveHtml = inactiveAlert
     ? `<div class="detail-inactive-alert">⚠️ Sin sesiones completadas en ${daysSinceLast} días</div>` : '';
 
-  const sessionsHtml = clientSlots.length === 0
-    ? `<div class="detail-empty">Sin sesiones registradas</div>`
-    : clientSlots.map(s => {
-        const d = toDate(s.date);
-        return `<div class="detail-session-item">
-          <span>${statusIcon(s.status)}</span>
-          <span style="flex:1">${d.toLocaleDateString('es-ES',{day:'numeric',month:'short'})}</span>
-          <span style="color:var(--text2);font-size:11px">${formatTime(d)}</span>
-        </div>`;
-      }).join('');
-
   const paymentsHtml = clientPayments.length === 0
     ? `<div class="detail-empty">Sin pagos registrados</div>`
     : clientPayments.map(p => {
@@ -500,6 +489,33 @@ window.openClientDetail = function (id) {
         </div>`;
       }).join('');
 
+  const objectiveLabels = {
+    perdida_peso:'Pérdida de peso', fuerza:'Ganancia de fuerza', resistencia:'Resistencia / cardio',
+    tonificacion:'Tonificación', rehabilitacion:'Rehabilitación', rendimiento:'Rendimiento deportivo',
+    salud:'Salud general', otro:'Otro'
+  };
+  const objectiveHtml = c.objective
+    ? `<span class="tag" style="background:rgba(232,255,71,.1);color:var(--primary);border:1px solid rgba(232,255,71,.25)">🎯 ${objectiveLabels[c.objective] || c.objective}</span>`
+    : '';
+
+  const sessionsHtml = clientSlots.length === 0
+    ? `<div class="detail-empty">Sin sesiones registradas</div>`
+    : clientSlots.map(s => {
+        const d = toDate(s.date);
+        const dur = s.duration ? `${s.duration}min` : '';
+        return `<div class="detail-session-item" onclick="openSlotModal('${s.id}',event)" style="cursor:pointer">
+          <span>${statusIcon(s.status)}</span>
+          <span style="flex:1">${d.toLocaleDateString('es-ES',{day:'numeric',month:'short'})}</span>
+          <span style="color:var(--text2);font-size:11px">${formatTime(d)}</span>
+          ${dur ? `<span style="color:var(--text3);font-size:10px">${dur}</span>` : ''}
+          ${s.notes ? `<span class="detail-session-note" title="${esc(s.notes)}">📝</span>` : ''}
+        </div>`;
+      }).join('');
+
+  const bonoActionHtml = c.paymentType === 'bono'
+    ? `<button class="btn btn-primary btn-sm" onclick="quickRenewBono('${c.id}')" style="margin-top:8px">↻ Renovar bono</button>`
+    : '';
+
   const page = $('page-client-detail');
   page.innerHTML = `
     <div class="page-header page-header--hero">
@@ -509,7 +525,10 @@ window.openClientDetail = function (id) {
           <button class="btn btn-outline btn-sm" onclick="navigate('clientes')">← Volver</button>
           <h1>${esc(c.name)}</h1>
         </div>
-        <button class="btn btn-primary btn-sm" onclick="openClientModal('${c.id}')">✏️ Editar</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="exportClientPDF('${c.id}')">📄 Exportar PDF</button>
+          <button class="btn btn-primary btn-sm" onclick="openClientModal('${c.id}')">✏️ Editar</button>
+        </div>
       </div>
     </div>
 
@@ -518,7 +537,7 @@ window.openClientDetail = function (id) {
       <div class="detail-info">
         <h2>${esc(c.name)}</h2>
         <p>${esc(c.phone || c.email || '—')}${c.notes ? ' · ' + esc(c.notes) : ''}</p>
-        <div class="detail-tags">${statusTag}${payTag}
+        <div class="detail-tags">${statusTag}${payTag}${objectiveHtml}
           <span class="tag" style="background:rgba(255,255,255,.06);color:var(--text2)">Total pagado: ${totalPaid.toFixed(0)}€</span>
         </div>
       </div>
@@ -527,6 +546,7 @@ window.openClientDetail = function (id) {
     ${inactiveHtml}
     ${nextHtml}
     ${bonoHtml}
+    ${bonoActionHtml}
 
     <div class="detail-attendance-row">
       <div class="detail-att-card">
@@ -564,6 +584,92 @@ window.openClientDetail = function (id) {
 // ═══════════════════════════════════════════════════════════
 //  DASHBOARD
 // ═══════════════════════════════════════════════════════════
+// ─── Dashboard tab state ─────────────────────────────────
+let dashTab = 'hoy'; // 'hoy' | 'proximas'
+
+window.switchDashTab = function(tab) {
+  dashTab = tab;
+  document.querySelectorAll('.dash-tab').forEach(b => b.classList.remove('active'));
+  const btn = tab === 'hoy' ? $('tab-hoy') : $('tab-proximas');
+  if (btn) btn.classList.add('active');
+  renderDashTodayPanel();
+};
+
+function renderDashTodayPanel() {
+  const todayEl = $('dash-today');
+  if (!todayEl) return;
+
+  const statusCls = st => st === 'completed' ? 'completed' : st === 'pending' ? 'pending' : st === 'cancelled' ? 'cancelled' : 'scheduled';
+  const statusTxt = st => st === 'completed' ? 'Completada' : st === 'pending' ? 'Pendiente' : st === 'cancelled' ? 'Cancelada' : 'Programada';
+
+  if (dashTab === 'hoy') {
+    const todayAll = slots.filter(s => isToday(toDate(s.date)));
+    if (todayAll.length === 0) {
+      todayEl.innerHTML = `<p class="dash-empty">Sin sesiones hoy</p>`;
+      return;
+    }
+    todayEl.innerHTML = `<div class="dash-timeline">
+      ${todayAll.sort((a,b) => toDate(a.date)-toDate(b.date)).map(s => {
+        const client = clients.find(c => c.id === s.clientId);
+        const name   = client ? client.name : (s.title || 'Bloqueado');
+        const cls    = statusCls(s.status);
+        const dur    = s.duration ? `${s.duration}min` : '';
+        const canComplete = s.status !== 'completed' && s.status !== 'cancelled' && s.clientId;
+        const hasReminder = s.reminded;
+        return `<div class="dash-tl-item">
+          <span class="dash-tl-dot ${cls}"></span>
+          <span class="dash-tl-time">${formatTime(toDate(s.date))}</span>
+          <span class="dash-tl-name">${esc(name)}</span>
+          ${dur ? `<span class="dash-tl-dur">${dur}</span>` : ''}
+          <span class="dash-tl-status ${cls}">${statusTxt(s.status)}</span>
+          ${canComplete ? `<button class="dash-tl-complete-btn" onclick="quickCompleteSlot('${s.id}')" title="Completar sesión">✓</button>` : ''}
+          <button class="dash-tl-remind-btn ${hasReminder ? 'reminded' : ''}" onclick="toggleReminder(event,'${s.id}')" title="${hasReminder ? 'Recordatorio enviado' : 'Marcar recordatorio enviado'}">📣</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+  } else {
+    // Próximas: sesiones de mañana en adelante
+    const now = new Date(); now.setHours(0,0,0,0);
+    const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+    const upcoming = slots
+      .filter(s => toDate(s.date) >= tomorrow && s.status !== 'cancelled')
+      .sort((a,b) => toDate(a.date)-toDate(b.date))
+      .slice(0, 10);
+    if (upcoming.length === 0) {
+      todayEl.innerHTML = `<p class="dash-empty">Sin próximas sesiones</p>`;
+      return;
+    }
+    todayEl.innerHTML = `<div class="dash-timeline">
+      ${upcoming.map(s => {
+        const client = clients.find(c => c.id === s.clientId);
+        const name   = client ? client.name : (s.title || 'Bloqueado');
+        const d      = toDate(s.date);
+        const dateStr = d.toLocaleDateString('es-ES', { weekday:'short', day:'numeric', month:'short' });
+        const dur    = s.duration ? `${s.duration}min` : '';
+        const hasReminder = s.reminded;
+        return `<div class="dash-tl-item">
+          <span class="dash-tl-dot scheduled"></span>
+          <span class="dash-tl-time" style="min-width:80px;font-size:11px">${dateStr}</span>
+          <span class="dash-tl-name">${esc(name)}</span>
+          ${dur ? `<span class="dash-tl-dur">${dur}</span>` : ''}
+          <span class="dash-tl-time" style="min-width:36px">${formatTime(d)}</span>
+          <button class="dash-tl-remind-btn ${hasReminder ? 'reminded' : ''}" onclick="toggleReminder(event,'${s.id}')" title="${hasReminder ? 'Recordatorio enviado' : 'Marcar recordatorio enviado'}">📣</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+}
+
+// ─── Quick reminder toggle ────────────────────────────────
+window.toggleReminder = async function(e, id) {
+  e.stopPropagation();
+  const s = slots.find(x => x.id === id);
+  if (!s) return;
+  const newVal = !s.reminded;
+  await updateDoc(doc(db, 'slots', id), { reminded: newVal, updatedAt: Timestamp.now() });
+  showToast(newVal ? '📣 Recordatorio marcado' : '📣 Recordatorio desmarcado');
+};
+
 function renderDashboard() {
   if (currentPage !== 'dashboard') return;
   if (!dataLoaded.clients || !dataLoaded.slots || !dataLoaded.payments) return;
@@ -576,7 +682,6 @@ function renderDashboard() {
   if ($('dash-date'))     $('dash-date').textContent = dateStr;
 
   const activeClients = clients.filter(c => c.active);
-  const totalRevenue  = payments.reduce((s, p) => s + (p.amount || 0), 0);
   const bonoThr = parseInt(localStorage.getItem('notif-bono-threshold') || '2', 10);
   const alerts = clients.filter(c => c.active && c.paymentType === 'bono' && (c.sessionsLeft || 0) <= bonoThr);
   updateBadges(alerts.length);
@@ -585,19 +690,27 @@ function renderDashboard() {
   if ($('dash-hero-sessions')) $('dash-hero-sessions').textContent = todaySlots.length;
 
   const alertsEl = $('dash-alerts');
-  if (alerts.length === 0) {
-    alertsEl.innerHTML = '';
-  } else {
-    alertsEl.innerHTML = `<button class="dash-alert-pill" onclick="navigate('clientes')">
-      <span class="dash-alert-dot"></span>
-      ${alerts.length} bono${alerts.length !== 1 ? 's' : ''} bajo
-    </button>`;
+  if (alertsEl) {
+    if (alerts.length === 0) {
+      alertsEl.innerHTML = '';
+    } else {
+      alertsEl.innerHTML = `<button class="dash-alert-pill" onclick="navigate('clientes')">
+        <span class="dash-alert-dot"></span>
+        ${alerts.length} bono${alerts.length !== 1 ? 's' : ''} bajo
+      </button>`;
+    }
   }
 
   const weekSlots = slots.filter(s => isThisWeek(toDate(s.date)) && s.status !== 'cancelled');
   const prevWeekStart = getWeekStart(new Date()); prevWeekStart.setDate(prevWeekStart.getDate() - 7);
   const prevWeekEnd   = new Date(prevWeekStart); prevWeekEnd.setDate(prevWeekEnd.getDate() + 6);
   const prevWeekSlots = slots.filter(s => { const d = toDate(s.date); return d >= prevWeekStart && d <= prevWeekEnd && s.status !== 'cancelled'; });
+
+  // Month revenue
+  const thisMonth = new Date(); const ty = thisMonth.getFullYear(); const tm = thisMonth.getMonth();
+  const monthRevenue = payments.filter(p => { const d = toDate(p.date); return d.getFullYear() === ty && d.getMonth() === tm; }).reduce((s, p) => s + (p.amount || 0), 0);
+  const prevMonthD = new Date(ty, tm - 1, 1);
+  const prevMonthRevenue = payments.filter(p => { const d = toDate(p.date); return d.getFullYear() === prevMonthD.getFullYear() && d.getMonth() === prevMonthD.getMonth(); }).reduce((s, p) => s + (p.amount || 0), 0);
 
   function kpiTrend(curr, prev) {
     if (prev === 0 && curr === 0) return `<span class="dash-kpi-trend flat">sin datos</span>`;
@@ -620,39 +733,17 @@ function renderDashboard() {
       ${kpiTrend(weekSlots.length, prevWeekSlots.length)}
     </div>
     <div class="dash-kpi">
-      <span class="dash-kpi-label">Tendencia</span>
-      <span class="dash-kpi-value" style="font-size:20px;letter-spacing:0">${weekSlots.length >= prevWeekSlots.length ? '▲' : '▼'}</span>
-      ${kpiTrend(weekSlots.length, prevWeekSlots.length)}
+      <span class="dash-kpi-label">Ingresos mes</span>
+      <span class="dash-kpi-value">${monthRevenue.toFixed(0)}€</span>
+      ${kpiTrend(monthRevenue, prevMonthRevenue)}
     </div>
     <div class="dash-kpi">
       <span class="dash-kpi-label">Ingresos totales</span>
-      <span class="dash-kpi-value">${totalRevenue.toFixed(0)}€</span>
+      <span class="dash-kpi-value">${payments.reduce((s, p) => s + (p.amount || 0), 0).toFixed(0)}€</span>
     </div>
   `;
 
-  const todayAll = slots.filter(s => isToday(toDate(s.date)));
-  const todayEl = $('dash-today');
-  if (todayAll.length === 0) {
-    todayEl.innerHTML = `<p class="dash-empty">Sin sesiones programadas para hoy</p>`;
-  } else {
-    const statusCls = st => st === 'completed' ? 'completed' : st === 'pending' ? 'pending' : st === 'cancelled' ? 'cancelled' : 'scheduled';
-    const statusTxt = st => st === 'completed' ? 'Completada' : st === 'pending' ? 'Pendiente' : st === 'cancelled' ? 'Cancelada' : 'Programada';
-    todayEl.innerHTML = `<div class="dash-timeline">
-      ${todayAll.sort((a,b) => toDate(a.date)-toDate(b.date)).map(s => {
-        const client = clients.find(c => c.id === s.clientId);
-        const name   = client ? client.name : (s.title || 'Bloqueado');
-        const cls    = statusCls(s.status);
-        const canComplete = s.status !== 'completed' && s.status !== 'cancelled' && s.clientId;
-        return `<div class="dash-tl-item">
-          <span class="dash-tl-dot ${cls}"></span>
-          <span class="dash-tl-time">${formatTime(toDate(s.date))}</span>
-          <span class="dash-tl-name">${esc(name)}</span>
-          <span class="dash-tl-status ${cls}">${statusTxt(s.status)}</span>
-          ${canComplete ? `<button class="dash-tl-complete-btn" onclick="quickCompleteSlot('${s.id}')" title="Completar sesión">✓</button>` : ''}
-        </div>`;
-      }).join('')}
-    </div>`;
-  }
+  renderDashTodayPanel();
 
   // Charts
   const sesLabels = [], sesCounts = [];
@@ -703,26 +794,27 @@ function renderDashboard() {
   }
 
   const bonosEl = $('dash-bonos');
-  const bonoClients = activeClients.filter(c => c.paymentType === 'bono').slice(0, 6);
+  const bonoClients = activeClients.filter(c => c.paymentType === 'bono').slice(0, 8);
   if (bonoClients.length === 0) {
     bonosEl.innerHTML = `<p class="dash-empty">Sin clientes con bono activo</p>`;
   } else {
-    const R = 26; const CIRC = 2 * Math.PI * R;
+    const R = 22; const CIRC = 2 * Math.PI * R;
     bonosEl.innerHTML = bonoClients.map(c => {
       const left = c.sessionsLeft || 0; const total = c.bonoSize || 10;
       const pct = Math.min(1, left / total); const offset = CIRC * (1 - pct);
       const color = left <= 2 ? 'var(--red)' : left <= 4 ? 'var(--orange)' : 'var(--green)';
       const pctTxt = Math.round(pct * 100); const firstName = esc(c.name).split(' ')[0];
       return `<div class="dash-ring-item" onclick="openClientDetail('${c.id}')">
-        <div style="position:relative;width:64px;height:64px">
-          <svg class="dash-ring-svg" width="64" height="64" viewBox="0 0 64 64">
-            <circle class="dash-ring-track" cx="32" cy="32" r="${R}"/>
-            <circle class="dash-ring-fill" cx="32" cy="32" r="${R}" stroke="${color}" stroke-dasharray="${CIRC}" stroke-dashoffset="${offset}"/>
+        <div style="position:relative;width:52px;height:52px">
+          <svg class="dash-ring-svg" width="52" height="52" viewBox="0 0 52 52">
+            <circle class="dash-ring-track" cx="26" cy="26" r="${R}"/>
+            <circle class="dash-ring-fill" cx="26" cy="26" r="${R}" stroke="${color}" stroke-dasharray="${CIRC}" stroke-dashoffset="${offset}"/>
           </svg>
-          <div class="dash-ring-pct" style="color:${color}">${pctTxt}%</div>
+          <div class="dash-ring-pct" style="color:${color};font-size:11px">${pctTxt}%</div>
         </div>
         <span class="dash-ring-name">${firstName}</span>
         <span class="dash-ring-sessions">${left}/${total}</span>
+        <button class="dash-ring-renew-btn" onclick="event.stopPropagation();quickRenewBono('${c.id}')" title="Renovar bono">↻</button>
       </div>`;
     }).join('');
   }
@@ -739,6 +831,23 @@ window.quickCompleteSlot = async function (id) {
     await updateDoc(doc(db, 'clients', client.id), { sessionsLeft: client.sessionsLeft - 1 });
   }
   showToast('☑️ Sesión completada');
+};
+
+// ── Quick renew bono from dashboard ───────────────────────
+window.quickRenewBono = function (clientId) {
+  const client = clients.find(c => c.id === clientId);
+  if (!client) return;
+  // Pre-fill payment modal with bono renewal
+  openPaymentModal();
+  // Defer so modal is rendered first
+  setTimeout(() => {
+    const sel = $('p-client');
+    if (sel) sel.value = clientId;
+    const conc = $('p-concept');
+    if (conc) { conc.value = 'bono'; togglePBonoGroup(); }
+    const sess = $('p-sessions');
+    if (sess) sess.value = client.bonoSize || 10;
+  }, 50);
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -941,6 +1050,7 @@ window.openClientModal = function (id) {
   $('c-payment-type').value = editingClient?.paymentType || 'bono';
   $('c-bono-size').value   = editingClient?.bonoSize || 10;
   $('c-sessions-left').value = editingClient?.sessionsLeft ?? 10;
+  $('c-objective').value   = editingClient?.objective || '';
   $('c-notes').value       = editingClient?.notes || '';
   $('c-active').checked    = editingClient ? editingClient.active !== false : true;
   toggleClass('btn-delete-client', 'hidden', !editingClient);
@@ -961,6 +1071,7 @@ window.saveClient = async function () {
     name, phone: $('c-phone').value.trim(), email: $('c-email').value.trim(),
     paymentType: $('c-payment-type').value, bonoSize: parseInt($('c-bono-size').value) || 10,
     sessionsLeft: parseInt($('c-sessions-left').value) || 0, notes: $('c-notes').value.trim(),
+    objective: $('c-objective').value,
     active: $('c-active').checked, updatedAt: Timestamp.now(),
   };
   if (editingClient) {
@@ -989,6 +1100,113 @@ window.closeModalClient = function (e) {
 // ═══════════════════════════════════════════════════════════
 //  CALENDARIO
 // ═══════════════════════════════════════════════════════════
+let calView = 'week'; // 'week' | 'month'
+let currentCalMonth = new Date();
+
+window.setCalView = function(v) {
+  calView = v;
+  $('btn-cal-week').classList.toggle('active', v === 'week');
+  $('btn-cal-month').classList.toggle('active', v === 'month');
+  const ph = document.querySelector('#page-calendario .ph-eyebrow');
+  if (ph) ph.textContent = v === 'week' ? 'Semana' : 'Mes';
+  if (v === 'week') {
+    $('week-nav-controls').classList.remove('hidden');
+    $('month-nav-controls').classList.add('hidden');
+    $('calendar-grid').classList.remove('hidden');
+    $('calendar-month-grid').classList.add('hidden');
+    $('toggle-weekend-btn')?.parentElement?.classList?.remove?.('hidden');
+    renderCalendario();
+  } else {
+    $('week-nav-controls').classList.add('hidden');
+    $('month-nav-controls').classList.remove('hidden');
+    $('calendar-grid').classList.add('hidden');
+    $('calendar-month-grid').classList.remove('hidden');
+    $('toggle-weekend-btn')?.parentElement?.classList?.add?.('hidden');
+    renderCalendarioMonth();
+  }
+};
+
+window.changeMonthCal = function(dir) {
+  currentCalMonth = new Date(currentCalMonth);
+  currentCalMonth.setMonth(currentCalMonth.getMonth() + dir);
+  renderCalendarioMonth();
+};
+window.goTodayCal = function() { currentCalMonth = new Date(); renderCalendarioMonth(); };
+
+function renderCalendarioMonth() {
+  if (!dataLoaded.clients || !dataLoaded.slots) return;
+  const y = currentCalMonth.getFullYear();
+  const m = currentCalMonth.getMonth();
+  const label = currentCalMonth.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+  const calLbl = $('month-cal-label');
+  if (calLbl) calLbl.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+
+  const firstDay = new Date(y, m, 1);
+  const lastDay  = new Date(y, m + 1, 0);
+  // Monday-based week offset
+  let startOffset = firstDay.getDay() - 1;
+  if (startOffset < 0) startOffset = 6;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const DAYS_ES = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+
+  let html = `<div class="cal-month-header">`;
+  DAYS_ES.forEach(d => { html += `<div class="cal-month-day-name">${d}</div>`; });
+  html += `</div><div class="cal-month-body">`;
+
+  // Empty cells before month start
+  for (let i = 0; i < startOffset; i++) {
+    html += `<div class="cal-month-cell cal-month-cell--empty"></div>`;
+  }
+
+  for (let day = 1; day <= lastDay.getDate(); day++) {
+    const date = new Date(y, m, day);
+    date.setHours(0,0,0,0);
+    const isT = date.getTime() === today.getTime();
+    const daySlots = slots.filter(s => {
+      const sd = toDate(s.date);
+      return sd.getFullYear() === y && sd.getMonth() === m && sd.getDate() === day;
+    }).sort((a,b) => toDate(a.date)-toDate(b.date));
+
+    const dateStr = `${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    html += `<div class="cal-month-cell${isT ? ' cal-month-cell--today' : ''}" onclick="handleMonthCellClick('${dateStr}')">
+      <div class="cal-month-cell-num${isT ? ' today-num' : ''}">${day}</div>
+      <div class="cal-month-events">`;
+
+    daySlots.slice(0, 3).forEach(s => {
+      const client = clients.find(c => c.id === s.clientId);
+      const label2 = client ? client.name.split(' ')[0] : (s.title || 'Bloq.');
+      const statusCls = s.status === 'completed' ? 'mev-completed' : s.status === 'pending' ? 'mev-pending' : s.status === 'cancelled' ? 'mev-cancelled' : 'mev-scheduled';
+      const color = (s.type === 'client' && client) ? avatarColor(client.name) : null;
+      const colorStyle = color && s.status !== 'cancelled' ? `background:${color}22;border-left:2px solid ${color};` : '';
+      html += `<div class="cal-month-ev ${statusCls}" style="${colorStyle}" onclick="event.stopPropagation();openSlotModal('${s.id}',event)">
+        ${formatTime(toDate(s.date))} ${esc(label2)}
+      </div>`;
+    });
+    if (daySlots.length > 3) {
+      html += `<div class="cal-month-ev-more">+${daySlots.length - 3} más</div>`;
+    }
+
+    html += `</div></div>`;
+  }
+
+  // Fill remaining cells
+  const totalCells = startOffset + lastDay.getDate();
+  const remainder = totalCells % 7;
+  if (remainder > 0) {
+    for (let i = 0; i < 7 - remainder; i++) {
+      html += `<div class="cal-month-cell cal-month-cell--empty"></div>`;
+    }
+  }
+
+  html += `</div>`;
+  $('calendar-month-grid').innerHTML = html;
+}
+
+window.handleMonthCellClick = function(dateStr) {
+  openSlotModal(null, null, dateStr, 9, 0);
+};
+
 const HOURS = Array.from({ length: 14 }, (_, i) => i + 7);
 let showWeekend = false;
 
@@ -1602,6 +1820,7 @@ window.changeMonth = function (dir) {
   currentMonth.setMonth(currentMonth.getMonth() + dir);
   pagoSearchQuery = '';
   pagoConceptFilter = 'all';
+  pagoClientFilter = '';
   renderPagos();
 };
 
@@ -1609,6 +1828,7 @@ window.goToCurrentMonth = function () {
   currentMonth = new Date();
   pagoSearchQuery = '';
   pagoConceptFilter = 'all';
+  pagoClientFilter = '';
   renderPagos();
 };
 
@@ -1657,9 +1877,11 @@ window.exportPaymentsCSV = function () {
 // ── Estado de filtros de pagos ────────────────────────────
 let pagoSearchQuery = '';
 let pagoConceptFilter = 'all';
+let pagoClientFilter = '';
 
 window.setPagoSearch = function(v) { pagoSearchQuery = v.toLowerCase(); renderPagosList(); };
 window.setPagoConceptFilter = function(v) { pagoConceptFilter = v; renderPagosList(); };
+window.setPagoClientFilter = function(v) { pagoClientFilter = v; renderPagosList(); };
 
 function buildRevenueChart() {
   const now = new Date();
@@ -1701,6 +1923,7 @@ function renderPagosList() {
 
   let filtered = monthPayments;
   if (pagoConceptFilter !== 'all') filtered = filtered.filter(p => p.concept === pagoConceptFilter);
+  if (pagoClientFilter) filtered = filtered.filter(p => p.clientId === pagoClientFilter);
   if (pagoSearchQuery) filtered = filtered.filter(p => {
     const client = clients.find(c => c.id === p.clientId);
     return (client?.name || '').toLowerCase().includes(pagoSearchQuery);
@@ -1788,6 +2011,10 @@ function renderPagos() {
       <div class="pagos-search-wrap">
         <input class="pagos-search" placeholder="🔍 Buscar cliente..." oninput="setPagoSearch(this.value)" value="${pagoSearchQuery}" />
       </div>
+      <select class="sort-select" onchange="setPagoClientFilter(this.value)" style="min-width:140px">
+        <option value="">Todos los clientes</option>
+        ${clients.filter(c => c.active).map(c => `<option value="${c.id}" ${pagoClientFilter === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+      </select>
       <div class="concept-filter-pills" id="concept-filter-pills">
         ${['all','bono','bono_pareja','sesion','mensual','otro'].map(v => {
           const label = { all:'Todos', bono:'Bono individual', bono_pareja:'Bono pareja', sesion:'Sesión suelta', mensual:'Mensual', otro:'Otro' }[v];
@@ -1915,7 +2142,234 @@ function statusIcon(status) { return { scheduled:'⏳', completed:'✅', pending
 function statusLabel(status) { return { scheduled:'Programada', completed:'Completada', pending:'Pendiente confirmación', cancelled:'Cancelada' }[status] || 'Programada'; }
 
 // ═══════════════════════════════════════════════════════════
-//  GLOBAL SEARCH
+//  EXPORT CLIENT PDF
+// ═══════════════════════════════════════════════════════════
+window.exportClientPDF = function (clientId) {
+  if (typeof window.jspdf === 'undefined') { alert('La librería PDF no está disponible. Recarga la página.'); return; }
+  const { jsPDF } = window.jspdf;
+  const c = clients.find(x => x.id === clientId);
+  if (!c) return;
+
+  const objectiveLabels = {
+    perdida_peso:'Pérdida de peso', fuerza:'Ganancia de fuerza', resistencia:'Resistencia / cardio',
+    tonificacion:'Tonificación', rehabilitacion:'Rehabilitación', rendimiento:'Rendimiento deportivo',
+    salud:'Salud general', otro:'Otro'
+  };
+
+  const clientSlots = slots
+    .filter(s => s.clientId === clientId)
+    .sort((a, b) => toDate(b.date) - toDate(a.date));
+  const clientPayments = payments
+    .filter(p => p.clientId === clientId)
+    .sort((a, b) => toDate(b.date) - toDate(a.date));
+
+  const completed  = clientSlots.filter(s => s.status === 'completed').length;
+  const cancelled  = clientSlots.filter(s => s.status === 'cancelled').length;
+  const totalPaid  = clientPayments.reduce((s, p) => s + (p.amount || 0), 0);
+  const attendance = clientSlots.length > 0 ? Math.round((completed / clientSlots.length) * 100) : 0;
+
+  const today = new Date().toLocaleDateString('es-ES', { day:'numeric', month:'long', year:'numeric' });
+
+  const doc2 = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+  const pageW = doc2.internal.pageSize.getWidth();
+  const pageH = doc2.internal.pageSize.getHeight();
+  const ml = 14; const mr = 14; const contentW = pageW - ml - mr;
+
+  // ── Header band ──────────────────────────────────────────
+  doc2.setFillColor(14, 15, 20);
+  doc2.rect(0, 0, pageW, 44, 'F');
+
+  // Accent left stripe
+  doc2.setFillColor(232, 255, 71);
+  doc2.rect(0, 0, 4, 44, 'F');
+
+  doc2.setTextColor(232, 255, 71);
+  doc2.setFontSize(11);
+  doc2.setFont('helvetica', 'bold');
+  doc2.text('⚡ FitTracker Pro', ml + 4, 14);
+
+  doc2.setTextColor(255, 255, 255);
+  doc2.setFontSize(18);
+  doc2.text(c.name, ml + 4, 26);
+
+  doc2.setTextColor(140, 150, 165);
+  doc2.setFontSize(9);
+  doc2.setFont('helvetica', 'normal');
+  doc2.text(`Informe generado el ${today}`, ml + 4, 35);
+
+  // Status / type tag (top right)
+  const statusTxt = c.active ? 'Activo' : 'Inactivo';
+  doc2.setTextColor(232, 255, 71);
+  doc2.setFontSize(9);
+  doc2.setFont('helvetica', 'bold');
+  doc2.text(statusTxt, pageW - mr, 22, { align: 'right' });
+
+  // ── Info block ───────────────────────────────────────────
+  let y = 54;
+
+  // Section: Datos personales
+  doc2.setFillColor(245, 247, 250);
+  doc2.roundedRect(ml, y, contentW, 30, 3, 3, 'F');
+
+  doc2.setTextColor(30, 33, 42);
+  doc2.setFontSize(8);
+  doc2.setFont('helvetica', 'bold');
+  doc2.text('DATOS PERSONALES', ml + 6, y + 7);
+
+  doc2.setFont('helvetica', 'normal');
+  doc2.setFontSize(9);
+  const col1x = ml + 6; const col2x = ml + contentW / 2 + 4;
+
+  const infoRows = [
+    ['Teléfono', c.phone || '—'],
+    ['Email', c.email || '—'],
+  ];
+  const infoRows2 = [
+    ['Tipo de pago', { bono:'Bono', mensual:'Mensual', individual:'Individual' }[c.paymentType] || '—'],
+    ['Objetivo', c.objective ? (objectiveLabels[c.objective] || c.objective) : '—'],
+  ];
+
+  infoRows.forEach((row, i) => {
+    const ry = y + 14 + i * 8;
+    doc2.setTextColor(100, 110, 130); doc2.text(row[0] + ':', col1x, ry);
+    doc2.setTextColor(30, 33, 42);   doc2.text(row[1], col1x + 28, ry);
+  });
+  infoRows2.forEach((row, i) => {
+    const ry = y + 14 + i * 8;
+    doc2.setTextColor(100, 110, 130); doc2.text(row[0] + ':', col2x, ry);
+    doc2.setTextColor(30, 33, 42);   doc2.text(row[1], col2x + 28, ry);
+  });
+
+  if (c.notes) {
+    y += 33;
+    doc2.setFontSize(8); doc2.setTextColor(100, 110, 130); doc2.setFont('helvetica', 'italic');
+    doc2.text(`Notas: ${c.notes}`, ml + 6, y);
+  }
+
+  // ── Stats row ────────────────────────────────────────────
+  y += 10;
+  const statW = (contentW - 9) / 4;
+  const stats = [
+    { label: 'Sesiones', value: String(clientSlots.length) },
+    { label: 'Completadas', value: String(completed) },
+    { label: 'Asistencia', value: `${attendance}%` },
+    { label: 'Total pagado', value: `${totalPaid.toFixed(0)}€` },
+  ];
+  stats.forEach((st, i) => {
+    const sx = ml + i * (statW + 3);
+    doc2.setFillColor(14, 15, 20);
+    doc2.roundedRect(sx, y, statW, 22, 3, 3, 'F');
+    doc2.setTextColor(232, 255, 71);
+    doc2.setFontSize(13); doc2.setFont('helvetica', 'bold');
+    doc2.text(st.value, sx + statW / 2, y + 12, { align: 'center' });
+    doc2.setTextColor(140, 150, 165);
+    doc2.setFontSize(7); doc2.setFont('helvetica', 'normal');
+    doc2.text(st.label.toUpperCase(), sx + statW / 2, y + 19, { align: 'center' });
+  });
+
+  // ── Bono block ───────────────────────────────────────────
+  if (c.paymentType === 'bono') {
+    y += 28;
+    const left = c.sessionsLeft || 0; const total = c.bonoSize || 10;
+    const pct = Math.round(Math.min(100, (left / total) * 100));
+    doc2.setFontSize(9); doc2.setFont('helvetica', 'bold'); doc2.setTextColor(30, 33, 42);
+    doc2.text(`Bono activo: ${left} de ${total} sesiones restantes (${pct}%)`, ml, y);
+
+    // Progress bar
+    y += 4;
+    doc2.setFillColor(230, 232, 240);
+    doc2.roundedRect(ml, y, contentW, 5, 2, 2, 'F');
+    const barColor = left <= 2 ? [239, 68, 68] : left <= 4 ? [245, 158, 11] : [34, 197, 94];
+    doc2.setFillColor(...barColor);
+    doc2.roundedRect(ml, y, contentW * pct / 100, 5, 2, 2, 'F');
+    y += 4;
+  }
+
+  // ── Sessions table ───────────────────────────────────────
+  y += 10;
+  const sessionRows = clientSlots.slice(0, 20).map(s => {
+    const d = toDate(s.date);
+    const statusStr = { scheduled:'Programada', completed:'Completada', pending:'Pendiente', cancelled:'Cancelada' }[s.status] || s.status;
+    const dur = s.duration ? `${s.duration} min` : '—';
+    return [
+      d.toLocaleDateString('es-ES', { day:'numeric', month:'short', year:'numeric' }),
+      formatTime(d),
+      dur,
+      statusStr,
+      s.notes ? s.notes.slice(0, 50) : '—'
+    ];
+  });
+
+  doc2.autoTable({
+    startY: y,
+    head: [['Fecha', 'Hora', 'Duración', 'Estado', 'Notas']],
+    body: sessionRows,
+    theme: 'grid',
+    headStyles: { fillColor: [14, 15, 20], textColor: [232, 255, 71], fontStyle: 'bold', fontSize: 8 },
+    bodyStyles: { fontSize: 8, textColor: [30, 33, 42] },
+    alternateRowStyles: { fillColor: [248, 249, 252] },
+    columnStyles: {
+      0: { cellWidth: 28 }, 1: { cellWidth: 16 }, 2: { cellWidth: 20 },
+      3: { cellWidth: 26 }, 4: { cellWidth: 'auto' }
+    },
+    margin: { left: ml, right: mr },
+    tableWidth: contentW,
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.column.index === 3) {
+        const st = data.cell.raw;
+        if (st === 'Completada') data.cell.styles.textColor = [34, 197, 94];
+        else if (st === 'Cancelada') data.cell.styles.textColor = [239, 68, 68];
+        else if (st === 'Pendiente') data.cell.styles.textColor = [245, 158, 11];
+      }
+    }
+  });
+
+  // ── Payments table ───────────────────────────────────────
+  if (clientPayments.length > 0) {
+    y = doc2.lastAutoTable.finalY + 10;
+    const payRows = clientPayments.slice(0, 15).map(p => {
+      const d = toDate(p.date);
+      return [
+        d.toLocaleDateString('es-ES', { day:'numeric', month:'short', year:'numeric' }),
+        conceptLabel(p.concept),
+        `${(p.amount || 0).toFixed(2)} €`,
+        p.notes || '—'
+      ];
+    });
+    doc2.autoTable({
+      startY: y,
+      head: [['Fecha', 'Concepto', 'Importe', 'Notas']],
+      body: payRows,
+      foot: [['', 'TOTAL', `${totalPaid.toFixed(2)} €`, '']],
+      theme: 'grid',
+      headStyles: { fillColor: [14, 15, 20], textColor: [232, 255, 71], fontStyle: 'bold', fontSize: 8 },
+      footStyles: { fillColor: [14, 15, 20], textColor: [232, 255, 71], fontStyle: 'bold', fontSize: 8 },
+      bodyStyles: { fontSize: 8, textColor: [30, 33, 42] },
+      alternateRowStyles: { fillColor: [248, 249, 252] },
+      columnStyles: { 0: { cellWidth: 28 }, 1: { cellWidth: 40 }, 2: { cellWidth: 24, halign: 'right' }, 3: { cellWidth: 'auto' } },
+      margin: { left: ml, right: mr },
+      tableWidth: contentW,
+      showFoot: 'lastPage',
+    });
+  }
+
+  // ── Footer on each page ──────────────────────────────────
+  const pageCount = doc2.internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc2.setPage(i);
+    doc2.setFontSize(7); doc2.setFont('helvetica', 'normal'); doc2.setTextColor(160, 165, 175);
+    doc2.setFillColor(14, 15, 20);
+    doc2.rect(0, pageH - 12, pageW, 12, 'F');
+    doc2.setTextColor(140, 150, 165);
+    doc2.text('FitTracker Pro', ml, pageH - 5);
+    doc2.text(`Página ${i} de ${pageCount}`, pageW - mr, pageH - 5, { align: 'right' });
+  }
+
+  const safeName = c.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+  doc2.save(`informe_${safeName}.pdf`);
+};
+
+
 // ═══════════════════════════════════════════════════════════
 window.openSearch = function () {
   const overlay = document.getElementById('search-overlay');
