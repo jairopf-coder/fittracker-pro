@@ -1207,7 +1207,7 @@ window.handleMonthCellClick = function(dateStr) {
   openSlotModal(null, null, dateStr, 9, 0);
 };
 
-const HOURS = Array.from({ length: 14 }, (_, i) => i + 7);
+const HOURS = Array.from({ length: 16 }, (_, i) => i + 7);
 let showWeekend = false;
 
 window.changeWeek = function (dir) {
@@ -1224,9 +1224,10 @@ function getWeekStart(d) {
   date.setDate(date.getDate() + diff); date.setHours(0, 0, 0, 0); return date;
 }
 
-const PX_PER_MIN = 40 / 60;
-const PX_PER_HOUR = 40;
+const PX_PER_HOUR = 32;
+const PX_PER_MIN = PX_PER_HOUR / 60;
 const CAL_START_H = 7;
+let miniCalOpen = false;
 function minutesToPx(minutes) { return minutes * PX_PER_MIN; }
 function timeToTopPx(h, m) { return minutesToPx((h - CAL_START_H) * 60 + m); }
 
@@ -1312,6 +1313,10 @@ function renderCalendario() {
       const endDate   = new Date(sd.getTime() + dur * 60000);
       const endTime   = formatTime(endDate);
       const showTime  = height >= 36;
+      const durLabel  = dur >= 60
+        ? (dur % 60 === 0 ? `${dur/60}h` : `${Math.floor(dur/60)}h${String(dur%60).padStart(2,'0')}`)
+        : `${dur}m`;
+      const showDur   = height >= 52;
 
       // Color per client (use client color for type=client, else default)
       const evColor = (s.type === 'client' && client) ? avatarColor(client.name) : null;
@@ -1337,6 +1342,7 @@ function renderCalendario() {
         data-tooltip-repeat="${s.repeatGroupId ? 'true' : ''}">
         <span class="ev-label">${esc(label)}${repeatBadge}</span>
         ${showTime ? `<span class="ev-time">${startTime} – ${endTime}</span>` : ''}
+        ${showDur && !showTime ? `<span class="ev-dur">${durLabel}</span>` : ''}
         ${quickBtn}
       </div>`;
     });
@@ -1410,6 +1416,129 @@ function renderCalendario() {
     const now = new Date();
     nowLine.style.top = timeToTopPx(now.getHours(), now.getMinutes()) + 'px';
   }, 60000);
+
+  // ── Auto-scroll to current time ───────────────────────
+  const wrapper = document.querySelector('.calendar-wrapper');
+  if (wrapper) {
+    const now = new Date();
+    const scrollTarget = timeToTopPx(now.getHours(), now.getMinutes()) - wrapper.clientHeight / 3;
+    wrapper.scrollTop = Math.max(0, scrollTarget);
+  }
+
+  // ── Swipe to change week (mobile) ────────────────────
+  if (!wrapper._swipeAttached) {
+    wrapper._swipeAttached = true;
+    let touchStartX = 0, touchStartY = 0;
+    wrapper.addEventListener('touchstart', e => {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    }, { passive: true });
+    wrapper.addEventListener('touchend', e => {
+      if (calView !== 'week') return;
+      const dx = e.changedTouches[0].clientX - touchStartX;
+      const dy = e.changedTouches[0].clientY - touchStartY;
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) {
+        changeWeek(dx < 0 ? 1 : -1);
+      }
+    }, { passive: true });
+  }
+}
+
+// ── Mini Calendar Picker ──────────────────────────────────
+window.toggleMiniCal = function() {
+  const picker = document.getElementById('mini-cal-picker');
+  if (!picker) return;
+  if (miniCalOpen) {
+    picker.classList.add('hidden');
+    miniCalOpen = false;
+    return;
+  }
+  miniCalOpen = true;
+  renderMiniCal();
+  picker.classList.remove('hidden');
+};
+
+function renderMiniCal() {
+  const picker = document.getElementById('mini-cal-picker');
+  if (!picker) return;
+  const base = currentWeek;
+  const y = base.getFullYear();
+  const m = base.getMonth();
+  const monthLabel = new Date(y, m, 1).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+  const DAYS_ES = ['L','M','X','J','V','S','D'];
+  const firstDay = new Date(y, m, 1);
+  let startOffset = firstDay.getDay() - 1;
+  if (startOffset < 0) startOffset = 6;
+  const lastDay = new Date(y, m + 1, 0).getDate();
+  const today = new Date(); today.setHours(0,0,0,0);
+  const curWeekStart = getWeekStart(currentWeek);
+
+  let html = `<div class="mc-header">
+    <button class="mc-nav" onclick="miniCalShiftMonth(-1)">‹</button>
+    <span class="mc-month">${monthLabel.charAt(0).toUpperCase() + monthLabel.slice(1)}</span>
+    <button class="mc-nav" onclick="miniCalShiftMonth(1)">›</button>
+  </div>
+  <div class="mc-grid">`;
+  DAYS_ES.forEach(d => { html += `<div class="mc-dayname">${d}</div>`; });
+  for (let i = 0; i < startOffset; i++) html += `<div></div>`;
+  for (let day = 1; day <= lastDay; day++) {
+    const d = new Date(y, m, day); d.setHours(0,0,0,0);
+    const ws = getWeekStart(d);
+    const isCurWeek = ws.getTime() === curWeekStart.getTime();
+    const isToday = d.getTime() === today.getTime();
+    const ts = d.getTime();
+    html += `<div class="mc-day${isCurWeek ? ' mc-cur-week' : ''}${isToday ? ' mc-today' : ''}" onclick="miniCalGoWeek(${ts})">${day}</div>`;
+  }
+  html += `</div>
+  <div class="mc-footer"><button class="mc-today-btn" onclick="miniCalGoToday()">Hoy</button></div>`;
+  picker.innerHTML = html;
+}
+
+let miniCalMonthOffset = 0;
+window.miniCalShiftMonth = function(dir) {
+  const base = currentWeek;
+  const shifted = new Date(base.getFullYear(), base.getMonth() + dir, 1);
+  currentWeek = new Date(shifted);
+  miniCalMonthOffset += dir;
+  renderMiniCal();
+};
+window.miniCalGoWeek = function(ts) {
+  currentWeek = new Date(ts);
+  const picker = document.getElementById('mini-cal-picker');
+  if (picker) picker.classList.add('hidden');
+  miniCalOpen = false;
+  renderCalendario();
+};
+window.miniCalGoToday = function() {
+  currentWeek = new Date();
+  const picker = document.getElementById('mini-cal-picker');
+  if (picker) picker.classList.add('hidden');
+  miniCalOpen = false;
+  renderCalendario();
+};
+
+// Close mini-cal when clicking outside
+document.addEventListener('click', function(e) {
+  if (!miniCalOpen) return;
+  const picker = document.getElementById('mini-cal-picker');
+  const label = document.getElementById('week-label');
+  if (picker && !picker.contains(e.target) && e.target !== label) {
+    picker.classList.add('hidden');
+    miniCalOpen = false;
+  }
+});
+
+// ── Overlap detection ──────────────────────────────────────
+function hasOverlap(date, duration, excludeId) {
+  const start = date.getTime();
+  const end   = start + duration * 60000;
+  return slots.some(s => {
+    if (s.id === excludeId) return false;
+    if (s.status === 'cancelled') return false;
+    const sStart = toDate(s.date).getTime();
+    const sEnd   = sStart + (s.duration || 60) * 60000;
+    return start < sEnd && end > sStart;
+  });
 }
 
 // ── Drag & Drop ───────────────────────────────────────────
@@ -1452,7 +1581,7 @@ window.handleDrop = async function (e, dayIdx) {
   const rawMin   = offsetPx / PX_PER_MIN - dragOffsetMin;
   const absMin   = CAL_START_H * 60 + rawMin;
   const snappedMin = Math.round(absMin / 15) * 15;
-  const newH = Math.max(CAL_START_H, Math.min(20, Math.floor(snappedMin / 60)));
+  const newH = Math.max(CAL_START_H, Math.min(22, Math.floor(snappedMin / 60)));
   const newM = snappedMin % 60;
   const weekStart = getWeekStart(currentWeek);
   const day = new Date(weekStart); day.setDate(day.getDate() + dayIdx);
@@ -1702,6 +1831,10 @@ window.saveSlot = async function () {
   const isRepeat = $('s-repeat').checked;
 
   if (!isRepeat) {
+    const dur = parseInt($('s-duration').value);
+    if (hasOverlap(baseDate, dur, null)) {
+      if (!confirm('⚠️ Ya existe una sesión en este horario. ¿Guardar igualmente?')) return;
+    }
     await addDoc(collection(db, 'slots'), {
       ...baseData, date: Timestamp.fromDate(baseDate), createdAt: Timestamp.now(),
     });

@@ -553,7 +553,7 @@ select { -webkit-appearance: none; appearance: none; }
 /* Time gutter */
 .cal-time-col { display: flex; flex-direction: column; }
 .cal-time {
-  height: 40px; padding: 0 6px;
+  height: 32px; padding: 0 6px;
   display: flex; align-items: flex-start; justify-content: flex-end;
   font-size: 10px; font-family: 'JetBrains Mono', monospace;
   color: var(--text3); padding-top: 4px;
@@ -571,7 +571,7 @@ select { -webkit-appearance: none; appearance: none; }
 
 /* Hour grid lines inside each day column */
 .cal-hour-slot {
-  height: 40px;
+  height: 32px;
   border-bottom: 1px solid var(--border);
   position: relative;
   pointer-events: none; /* let clicks pass through to col */
@@ -660,6 +660,73 @@ select { -webkit-appearance: none; appearance: none; }
   opacity: .7; transition: opacity .15s;
 }
 .weekend-btn:hover { opacity: 1; }
+
+/* ── Event duration badge ── */
+.ev-dur {
+  font-size: 9px; opacity: .65; white-space: nowrap;
+  letter-spacing: .3px;
+}
+
+/* ── Mini calendar picker ── */
+.mini-cal-picker {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%; transform: translateX(-50%);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  z-index: 200;
+  box-shadow: 0 8px 32px rgba(0,0,0,.45);
+  width: 220px;
+  font-family: 'Syne', sans-serif;
+}
+.mc-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.mc-month {
+  font-size: 12px; font-weight: 700; color: var(--text1);
+  text-transform: capitalize;
+}
+.mc-nav {
+  background: none; border: none; color: var(--text2);
+  font-size: 16px; cursor: pointer; padding: 2px 6px; border-radius: 6px;
+  transition: background .12s;
+}
+.mc-nav:hover { background: var(--bg3); color: var(--text1); }
+.mc-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  gap: 2px; margin-bottom: 10px;
+}
+.mc-dayname {
+  font-size: 9px; font-weight: 700; color: var(--text3);
+  text-align: center; padding: 2px 0;
+  text-transform: uppercase; letter-spacing: .5px;
+}
+.mc-day {
+  font-size: 11px; font-weight: 600; text-align: center;
+  padding: 4px 2px; border-radius: 6px; cursor: pointer;
+  color: var(--text2); transition: background .1s, color .1s;
+}
+.mc-day:hover { background: var(--bg3); color: var(--text1); }
+.mc-day.mc-today { color: var(--accent); font-weight: 800; }
+.mc-day.mc-cur-week {
+  background: rgba(232,255,71,.12);
+  color: var(--accent);
+}
+.mc-footer { text-align: center; }
+.mc-today-btn {
+  font-size: 11px; font-weight: 700;
+  background: rgba(232,255,71,.1); border: 1px solid rgba(232,255,71,.25);
+  color: var(--accent); border-radius: 6px; padding: 4px 14px; cursor: pointer;
+  transition: background .12s;
+}
+.mc-today-btn:hover { background: rgba(232,255,71,.2); }
+
+/* Week-nav relative for picker positioning */
+#week-nav-controls { position: relative; }
+
 .ld-cancelled { background: rgba(100,100,100,.08); border-left-color: rgba(150,150,150,.4); }
 
 /* ── Day picker for recurring ── */
@@ -1010,6 +1077,49 @@ select { -webkit-appearance: none; appearance: none; }
   .main-content { margin-left: var(--sidebar-w); padding-top: 0; }
   .nav-item { min-height: 48px; }
   .btn { min-height: 44px; }
+}
+
+/* ── Calendar: iPhone optimizations ── */
+@media (max-width: 480px) {
+  .calendar-wrapper { border-radius: 8px; }
+  .cal-day-header { padding: 6px 3px; }
+  .day-number { font-size: 14px; }
+  .day-name { font-size: 9px; letter-spacing: .5px; }
+  .cal-time { font-size: 9px; padding: 0 3px; }
+  .cal-event { left: 1px; right: 1px; padding: 2px 4px; border-radius: 4px; }
+  .cal-event .ev-label { font-size: 9px; }
+  .cal-event .ev-time { font-size: 8px; }
+  .ev-dur { font-size: 8px; }
+  /* Bigger touch targets for day columns */
+  .cal-hour-slot { pointer-events: auto; }
+  /* Mini-cal positioned correctly on small screens */
+  .mini-cal-picker { width: 200px; left: 0; transform: none; }
+  /* Hide quick complete on touch (uses tap instead) */
+  .ev-quick-complete { display: none !important; }
+  /* Week nav compact */
+  .week-nav { gap: 4px; }
+  .btn-outline.btn-sm { padding: 5px 8px; font-size: 11px; }
+}
+
+/* ── Calendar: iPad optimizations ── */
+@media (min-width: 481px) and (max-width: 1024px) and (pointer: coarse) {
+  .cal-event { left: 2px; right: 2px; }
+  .cal-event .ev-label { font-size: 10px; }
+  .cal-day-header { padding: 8px 4px; }
+  /* Slightly larger touch target per hour slot */
+  .cal-day-col { cursor: default; }
+  /* Mini-cal readable on iPad */
+  .mini-cal-picker { width: 230px; }
+}
+
+/* ── Calendar: hide swipe hint ── */
+@media (pointer: coarse) {
+  .week-label::after {
+    content: ' ↔';
+    font-size: 9px;
+    opacity: .4;
+    font-weight: 400;
+  }
 }
 
 /* ── Cal-event Tooltip ───────────────────────────────────── */
