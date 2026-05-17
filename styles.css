@@ -969,7 +969,49 @@ select { -webkit-appearance: none; appearance: none; }
 .toast.success { background: var(--green);  color: #000; }
 .toast.error   { background: var(--red);    color: #fff; }
 .toast.info    { background: var(--accent); color: #000; }
+.toast.warning { background: #f59e0b;       color: #000; }
 .toast.hiding  { animation: toastOut .2s ease forwards; }
+
+/* ─── CONNECTION STATUS DOT ──────────────────────────────── */
+.conn-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  cursor: default;
+  transition: background .4s, box-shadow .4s;
+  position: relative;
+}
+.conn-dot::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  opacity: 0;
+}
+.conn-online {
+  background: #22c55e;
+  box-shadow: 0 0 0 0 rgba(34,197,94,.5);
+  animation: connPulse 3s infinite;
+}
+.conn-offline {
+  background: #f59e0b;
+  box-shadow: 0 0 6px rgba(245,158,11,.7);
+  animation: none;
+}
+.conn-error {
+  background: var(--red);
+  box-shadow: 0 0 6px rgba(239,68,68,.7);
+  animation: connBlink 1s infinite;
+}
+@keyframes connPulse {
+  0%   { box-shadow: 0 0 0 0   rgba(34,197,94,.5); }
+  70%  { box-shadow: 0 0 0 6px rgba(34,197,94,0);  }
+  100% { box-shadow: 0 0 0 0   rgba(34,197,94,0);  }
+}
+@keyframes connBlink {
+  0%,100% { opacity: 1; }
+  50%     { opacity: .35; }
+}
 
 /* ─── PÁGINA DETALLE CLIENTE ─────────────────────────────── */
 .detail-hero {

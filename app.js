@@ -7,13 +7,23 @@ import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
                                    from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { getFirestore, collection, doc,
          addDoc, setDoc, updateDoc, deleteDoc,
-         onSnapshot, query, where, orderBy, Timestamp }
+         onSnapshot, query, where, orderBy, Timestamp,
+         enableIndexedDbPersistence }
                                    from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
 // ─── Init Firebase ───────────────────────────────────────
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db   = getFirestore(app);
+
+// ─── Offline persistence ──────────────────────────────────
+enableIndexedDbPersistence(db).catch(err => {
+  if (err.code === 'failed-precondition') {
+    console.warn('[Firestore] Persistencia offline no disponible (múltiples pestañas)');
+  } else if (err.code === 'unimplemented') {
+    console.warn('[Firestore] Este navegador no soporta persistencia offline');
+  }
+});
 
 // ─── State ───────────────────────────────────────────────
 let clients   = [];
@@ -33,6 +43,11 @@ let slotModalDirty = false;
 const unsubs = {};
 
 const dataLoaded = { clients: false, slots: false, payments: false };
+
+// ─── Connection status ────────────────────────────────────
+// 'online' | 'offline' | 'error'
+let _connStatus = 'online';
+let _wasOffline  = false;
 
 // ─── Theme ───────────────────────────────────────────────
 (function initTheme() {
@@ -161,6 +176,61 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ═══════════════════════════════════════════════════════════
+//  CONNECTION STATUS
+// ═══════════════════════════════════════════════════════════
+
+function _setConnStatus(status) {
+  if (_connStatus === status) return;
+  _connStatus = status;
+  _renderConnDot();
+}
+
+function _renderConnDot() {
+  const dot = document.getElementById('conn-dot');
+  if (!dot) return;
+
+  dot.classList.remove('conn-online', 'conn-offline', 'conn-error');
+
+  switch (_connStatus) {
+    case 'online':
+      dot.classList.add('conn-online');
+      dot.title = 'Conexión activa · Firebase OK';
+      break;
+    case 'offline':
+      dot.classList.add('conn-offline');
+      dot.title = 'Sin conexión · Modo offline (datos en caché)';
+      break;
+    case 'error':
+      dot.classList.add('conn-error');
+      dot.title = 'Error de conexión con Firebase';
+      break;
+  }
+}
+
+// Listen to browser online/offline events
+window.addEventListener('online', () => {
+  if (_wasOffline) {
+    _wasOffline = false;
+    _setConnStatus('online');
+    showToast('✅ Conexión recuperada — sincronizando datos…', 'success');
+    // Firestore re-syncs automatically; force a UI refresh after a short delay
+    setTimeout(() => refreshAll(), 1500);
+  }
+});
+
+window.addEventListener('offline', () => {
+  _wasOffline = true;
+  _setConnStatus('offline');
+  showToast('📡 Sin conexión — usando datos en caché', 'warning');
+});
+
+// Initialize dot on load
+document.addEventListener('DOMContentLoaded', () => {
+  _setConnStatus(navigator.onLine ? 'online' : 'offline');
+  if (!navigator.onLine) _wasOffline = true;
+});
+
+// ═══════════════════════════════════════════════════════════
 //  AUTH
 // ═══════════════════════════════════════════════════════════
 onAuthStateChanged(auth, user => {
@@ -200,17 +270,33 @@ document.getElementById('login-password').addEventListener('keydown', e => {
 // ═══════════════════════════════════════════════════════════
 function startListeners() {
   showSkeletons();
+
+  const _onFirestoreData = () => {
+    if (navigator.onLine) _setConnStatus('online');
+  };
+  const _onFirestoreError = (err) => {
+    console.warn('[Firestore] error snapshot:', err.code);
+    if (!navigator.onLine) {
+      _setConnStatus('offline');
+    } else {
+      _setConnStatus('error');
+    }
+  };
+
   unsubs.clients = onSnapshot(
     query(collection(db, 'clients'), orderBy('name')),
-    snap => { clients = snap.docs.map(d => ({ id: d.id, ...d.data() })); dataLoaded.clients = true; refreshAll(); }
+    snap => { clients = snap.docs.map(d => ({ id: d.id, ...d.data() })); dataLoaded.clients = true; _onFirestoreData(); refreshAll(); },
+    _onFirestoreError
   );
   unsubs.slots = onSnapshot(
     query(collection(db, 'slots'), orderBy('date')),
-    snap => { slots = snap.docs.map(d => ({ id: d.id, ...d.data() })); dataLoaded.slots = true; refreshAll(); }
+    snap => { slots = snap.docs.map(d => ({ id: d.id, ...d.data() })); dataLoaded.slots = true; _onFirestoreData(); refreshAll(); },
+    _onFirestoreError
   );
   unsubs.payments = onSnapshot(
     query(collection(db, 'payments'), orderBy('date', 'desc')),
-    snap => { payments = snap.docs.map(d => ({ id: d.id, ...d.data() })); dataLoaded.payments = true; refreshAll(); }
+    snap => { payments = snap.docs.map(d => ({ id: d.id, ...d.data() })); dataLoaded.payments = true; _onFirestoreData(); refreshAll(); },
+    _onFirestoreError
   );
 }
 
