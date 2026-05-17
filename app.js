@@ -352,6 +352,31 @@ async function scheduleSessionNotifications() {
     const left = c.sessionsLeft || 0;
     swReg.active.postMessage({ type: 'SHOW_NOTIFICATION', title: `Bono bajo: ${c.name}`, body: `Solo tiene ${left} sesión${left === 1 ? '' : 'es'} restante${left === 1 ? '' : 's'}`, tag: `bono-${c.id}` });
   }
+
+  // ── Nightly reminder: sessions from today not yet completed ─────────────
+  const incompletePast = slots.filter(s => {
+    const d = toDate(s.date);
+    return isToday(d) && d <= now && s.clientId && s.status !== 'completed' && s.status !== 'cancelled';
+  });
+  if (incompletePast.length > 0) {
+    const tonight = new Date(); tonight.setHours(21, 30, 0, 0);
+    const nightDelay = tonight.getTime() - now.getTime();
+    const buildBody = list => {
+      const names = list.map(s => { const c = clients.find(x => x.id === s.clientId); return c ? c.name.split(' ')[0] : 'Cliente'; });
+      return list.length === 1
+        ? `Sesión de ${names[0]} sin completar`
+        : `${list.length} sesiones sin completar: ${names.slice(0,3).join(', ')}${names.length > 3 ? '…' : ''}`;
+    };
+    if (nightDelay > 0) {
+      swReg.active.postMessage({ type: 'SCHEDULE_NOTIFICATION', delay: nightDelay, title: '⚠️ Sesiones pendientes de cerrar', body: buildBody(incompletePast), tag: 'nightly-incomplete' });
+    } else {
+      const todayKey = now.toISOString().slice(0, 10);
+      if (localStorage.getItem('nightly-notif-date') !== todayKey) {
+        localStorage.setItem('nightly-notif-date', todayKey);
+        swReg.active.postMessage({ type: 'SHOW_NOTIFICATION', title: '⚠️ Sesiones pendientes de cerrar', body: buildBody(incompletePast), tag: 'nightly-incomplete' });
+      }
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -562,12 +587,14 @@ window.openClientDetail = function (id) {
     : clientSlots.map(s => {
         const d = toDate(s.date);
         const dur = s.duration ? `${s.duration}min` : '';
-        return `<div class="detail-session-item" onclick="openSlotModal('${s.id}',event)" style="cursor:pointer">
-          <span>${statusIcon(s.status)}</span>
-          <span style="flex:1">${d.toLocaleDateString('es-ES',{day:'numeric',month:'short'})}</span>
-          <span style="color:var(--text2);font-size:11px">${formatTime(d)}</span>
-          ${dur ? `<span style="color:var(--text3);font-size:10px">${dur}</span>` : ''}
-          ${s.notes ? `<span class="detail-session-note" title="${esc(s.notes)}">📝</span>` : ''}
+        return `<div class="detail-session-item${s.notes ? ' detail-session-item--has-notes' : ''}" onclick="openSlotModal('${s.id}',event)" style="cursor:pointer">
+          <div class="detail-session-main">
+            <span>${statusIcon(s.status)}</span>
+            <span style="flex:1">${d.toLocaleDateString('es-ES',{day:'numeric',month:'short'})}</span>
+            <span style="color:var(--text2);font-size:11px">${formatTime(d)}</span>
+            ${dur ? `<span style="color:var(--text3);font-size:10px">${dur}</span>` : ''}
+          </div>
+          ${s.notes ? `<div class="detail-session-notes">📝 ${esc(s.notes)}</div>` : ''}
         </div>`;
       }).join('');
 
@@ -675,14 +702,18 @@ function renderDashTodayPanel() {
         const dur    = s.duration ? `${s.duration}min` : '';
         const canComplete = s.status !== 'completed' && s.status !== 'cancelled' && s.clientId;
         const hasReminder = s.reminded;
-        return `<div class="dash-tl-item">
-          <span class="dash-tl-dot ${cls}"></span>
-          <span class="dash-tl-time">${formatTime(toDate(s.date))}</span>
-          <span class="dash-tl-name">${esc(name)}</span>
-          ${dur ? `<span class="dash-tl-dur">${dur}</span>` : ''}
-          <span class="dash-tl-status ${cls}">${statusTxt(s.status)}</span>
-          ${canComplete ? `<button class="dash-tl-complete-btn" onclick="quickCompleteSlot('${s.id}')" title="Completar sesión">✓</button>` : ''}
-          <button class="dash-tl-remind-btn ${hasReminder ? 'reminded' : ''}" onclick="toggleReminder(event,'${s.id}')" title="${hasReminder ? 'Recordatorio enviado' : 'Marcar recordatorio enviado'}">📣</button>
+        const notesSnip = s.notes ? `<span class="dash-tl-note" title="${esc(s.notes)}">📝 ${esc(s.notes.length > 50 ? s.notes.slice(0,50)+'…' : s.notes)}</span>` : '';
+        return `<div class="dash-tl-item${canComplete ? ' dash-tl-item--pending' : ''}">
+          <div class="dash-tl-main">
+            <span class="dash-tl-dot ${cls}"></span>
+            <span class="dash-tl-time">${formatTime(toDate(s.date))}</span>
+            <span class="dash-tl-name">${esc(name)}</span>
+            ${dur ? `<span class="dash-tl-dur">${dur}</span>` : ''}
+            <span class="dash-tl-status ${cls}">${statusTxt(s.status)}</span>
+            <button class="dash-tl-remind-btn ${hasReminder ? 'reminded' : ''}" onclick="toggleReminder(event,'${s.id}')" title="${hasReminder ? 'Recordatorio enviado' : 'Marcar recordatorio enviado'}">📣</button>
+          </div>
+          ${notesSnip ? `<div class="dash-tl-notes-row">${notesSnip}</div>` : ''}
+          ${canComplete ? `<button class="dash-tl-complete-btn" onclick="quickCompleteSlot('${s.id}')">✓ Completar</button>` : ''}
         </div>`;
       }).join('')}
     </div>`;
@@ -752,14 +783,41 @@ function renderDashboard() {
 
   const alertsEl = $('dash-alerts');
   if (alertsEl) {
-    if (alerts.length === 0) {
-      alertsEl.innerHTML = '';
-    } else {
-      alertsEl.innerHTML = `<button class="dash-alert-pill" onclick="navigate('clientes')">
-        <span class="dash-alert-dot"></span>
-        ${alerts.length} bono${alerts.length !== 1 ? 's' : ''} bajo
-      </button>`;
-    }
+    // Bono bajo
+    const bonoPill = alerts.length > 0
+      ? `<button class="dash-alert-pill" onclick="navigate('clientes')">
+          <span class="dash-alert-dot"></span>
+          ${alerts.length} bono${alerts.length !== 1 ? 's' : ''} bajo
+        </button>`
+      : '';
+
+    // Clientes activos sin pago este mes (bono o mensual)
+    const now2 = new Date(); const ty2 = now2.getFullYear(); const tm2 = now2.getMonth();
+    const monthPays = payments.filter(p => { const d = toDate(p.date); return d.getFullYear() === ty2 && d.getMonth() === tm2; });
+    const sinCobrar = clients.filter(c => {
+      if (!c.active) return false;
+      return !monthPays.some(p => p.clientId === c.id);
+    });
+    const cobroPill = sinCobrar.length > 0
+      ? `<button class="dash-alert-pill dash-alert-pill--cobro" onclick="navigate('pagos')" title="${sinCobrar.map(c=>c.name).join(', ')}">
+          <span class="dash-alert-dot dash-alert-dot--cobro"></span>
+          ${sinCobrar.length} sin cobrar
+        </button>`
+      : '';
+
+    // Sesiones de hoy sin completar
+    const incompletePast2 = slots.filter(s => {
+      const d = toDate(s.date);
+      return isToday(d) && d <= new Date() && s.clientId && s.status !== 'completed' && s.status !== 'cancelled';
+    });
+    const incompletePill = incompletePast2.length > 0
+      ? `<button class="dash-alert-pill dash-alert-pill--incomplete" onclick="setDashTab('hoy')">
+          <span class="dash-alert-dot dash-alert-dot--incomplete"></span>
+          ${incompletePast2.length} sin cerrar hoy
+        </button>`
+      : '';
+
+    alertsEl.innerHTML = bonoPill + cobroPill + incompletePill;
   }
 
   const weekSlots = slots.filter(s => isThisWeek(toDate(s.date)) && s.status !== 'cancelled');
@@ -975,8 +1033,16 @@ function renderDashRendimiento(el) {
 window.quickCompleteSlot = async function (id) {
   const s = slots.find(x => x.id === id);
   if (!s) return;
-  if (!confirm('¿Marcar como completada?')) return;
-  await updateDoc(doc(db, 'slots', s.id), { status: 'completed', updatedAt: Timestamp.now() });
+
+  // Show a quick note prompt
+  const nota = prompt('✅ Completar sesión\n\nNotas de la sesión (opcional):', s.notes || '');
+  if (nota === null) return; // cancelled
+
+  const updates = { status: 'completed', updatedAt: Timestamp.now() };
+  if (nota.trim()) updates.notes = nota.trim();
+  await updateDoc(doc(db, 'slots', s.id), updates);
+
+  // Discount bono if applicable
   const client = clients.find(c => c.id === s.clientId);
   if (client && client.paymentType === 'bono' && (client.sessionsLeft || 0) > 0) {
     await updateDoc(doc(db, 'clients', client.id), { sessionsLeft: client.sessionsLeft - 1 });
@@ -1067,6 +1133,11 @@ window.renderClientes = function () {
       if (!la && !lb) return a.name.localeCompare(b.name, 'es');
       if (!la) return -1; if (!lb) return 1;
       return toDate(la.date) - toDate(lb.date);
+    }
+    if (sortBy === 'bono') {
+      const leftA = a.paymentType === 'bono' ? (a.sessionsLeft || 0) : 9999;
+      const leftB = b.paymentType === 'bono' ? (b.sessionsLeft || 0) : 9999;
+      return leftA - leftB;
     }
     return 0;
   });
@@ -1913,6 +1984,27 @@ window.updateRepeatPreview = function () {
 };
 
 // ── Save Slot ─────────────────────────────────────────────
+// ── Adjust bono when a slot's status changes ─────────────
+async function _applyBonoOnStatusChange(slot, oldStatus, newStatus) {
+  const clientId = slot.clientId;
+  if (!clientId) return;
+  const client = clients.find(c => c.id === clientId);
+  if (!client || client.paymentType !== 'bono') return;
+
+  const wasCompleted = oldStatus === 'completed';
+  const nowCompleted = newStatus === 'completed';
+
+  if (!wasCompleted && nowCompleted) {
+    // Completing: discount one session (only if sessions remain)
+    if ((client.sessionsLeft || 0) > 0) {
+      await updateDoc(doc(db, 'clients', clientId), { sessionsLeft: client.sessionsLeft - 1 });
+    }
+  } else if (wasCompleted && !nowCompleted) {
+    // Un-completing: restore one session
+    await updateDoc(doc(db, 'clients', clientId), { sessionsLeft: (client.sessionsLeft || 0) + 1 });
+  }
+}
+
 window.saveSlot = async function () {
   const type    = $('s-type').value;
   const dateStr = $('s-date').value;
@@ -1923,18 +2015,20 @@ window.saveSlot = async function () {
   const [y, m, d] = dateStr.split('-').map(Number);
   const baseDate  = new Date(y, m-1, d, hour, min, 0);
 
+  const newStatus = editingSlot ? $('s-status').value : 'scheduled';
   const baseData = {
     type,
     clientId:  type === 'client' ? ($('s-client').value || null) : null,
     title:     type !== 'client' ? $('s-title').value.trim() : '',
     duration:  parseInt($('s-duration').value),
     notes:     $('s-notes').value.trim(),
-    status:    editingSlot ? $('s-status').value : 'scheduled',
+    status:    newStatus,
     updatedAt: Timestamp.now(),
   };
 
   if (editingSlot) {
     baseData.date = Timestamp.fromDate(new Date(y, m-1, d, hour, min, 0));
+    const oldStatus = editingSlot.status;
 
     if (editingSlot.repeatGroupId) {
       // Ask what scope to apply changes to
@@ -1947,6 +2041,7 @@ window.saveSlot = async function () {
         // Only this
         async () => {
           await updateDoc(doc(db, 'slots', editingSlot.id), baseData);
+          await _applyBonoOnStatusChange(editingSlot, oldStatus, newStatus);
           closeModalSlot();
           showToast('✅ Sesión actualizada');
         },
@@ -1966,6 +2061,8 @@ window.saveSlot = async function () {
               status: baseData.status,
             });
           }
+          // Only adjust bono for the slot being edited (individual status transitions)
+          await _applyBonoOnStatusChange(editingSlot, oldStatus, newStatus);
           closeModalSlot();
           showToast(`✅ ${future.length} sesiones actualizadas`);
         },
@@ -1984,12 +2081,14 @@ window.saveSlot = async function () {
               status: baseData.status,
             });
           }
+          await _applyBonoOnStatusChange(editingSlot, oldStatus, newStatus);
           closeModalSlot();
           showToast(`✅ ${group.length} sesiones actualizadas`);
         }
       );
     } else {
       await updateDoc(doc(db, 'slots', editingSlot.id), baseData);
+      await _applyBonoOnStatusChange(editingSlot, oldStatus, newStatus);
       closeModalSlot();
       showToast('✅ Sesión actualizada');
     }
@@ -2095,7 +2194,8 @@ window.deleteSlot = async function () {
 window.completeSlot = async function () {
   if (!editingSlot) return;
   if (!confirm('¿Marcar como completada? Se descontará una sesión del bono.')) return;
-  await updateDoc(doc(db, 'slots', editingSlot.id), { status: 'completed', updatedAt: Timestamp.now() });
+  const currentNotes = $('s-notes')?.value?.trim() || editingSlot.notes || '';
+  await updateDoc(doc(db, 'slots', editingSlot.id), { status: 'completed', notes: currentNotes, updatedAt: Timestamp.now() });
   const client = clients.find(c => c.id === editingSlot.clientId);
   if (client && client.paymentType === 'bono' && (client.sessionsLeft || 0) > 0) {
     await updateDoc(doc(db, 'clients', client.id), { sessionsLeft: client.sessionsLeft - 1 });
