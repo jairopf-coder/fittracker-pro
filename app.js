@@ -219,6 +219,55 @@ function stopListeners() {
   dataLoaded.clients = false; dataLoaded.slots = false; dataLoaded.payments = false;
 }
 
+// ── Pull-to-refresh (A4) ──────────────────────────────────
+(function initPullToRefresh() {
+  let startY = 0;
+  let pulling = false;
+  let indicator = null;
+
+  function getIndicator() {
+    if (!indicator) {
+      indicator = document.createElement('div');
+      indicator.className = 'ptr-indicator';
+      document.body.appendChild(indicator);
+    }
+    return indicator;
+  }
+
+  document.addEventListener('touchstart', e => {
+    const main = document.querySelector('main');
+    if (!main || main.scrollTop > 4) return;
+    startY = e.touches[0].clientY;
+    pulling = true;
+  }, { passive: true });
+
+  document.addEventListener('touchmove', e => {
+    if (!pulling) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy > 45) {
+      const ind = getIndicator();
+      ind.classList.add('ptr-visible');
+      ind.classList.remove('ptr-refreshing');
+      ind.textContent = dy > 95 ? '↑ Suelta para actualizar' : '↓ Baja más...';
+    }
+  }, { passive: true });
+
+  document.addEventListener('touchend', e => {
+    if (!pulling) return;
+    pulling = false;
+    const dy = e.changedTouches[0].clientY - startY;
+    const ind = indicator;
+    if (dy > 95 && ind) {
+      ind.innerHTML = '<div class="ptr-spinner"></div> Actualizando...';
+      ind.classList.add('ptr-refreshing');
+      refreshAll();
+      setTimeout(() => { ind.classList.remove('ptr-visible','ptr-refreshing'); }, 1300);
+    } else if (ind) {
+      ind.classList.remove('ptr-visible');
+    }
+  }, { passive: true });
+})();
+
 function skeletonGrid(cls, count) {
   return Array(count).fill(`<div class="skeleton ${cls}"></div>`).join('');
 }
@@ -308,10 +357,18 @@ async function scheduleSessionNotifications() {
 // ═══════════════════════════════════════════════════════════
 //  NAVIGATION
 // ═══════════════════════════════════════════════════════════
+// Nav order for slide direction
+const NAV_ORDER = ['dashboard','clientes','calendario','pagos'];
+
 window.navigate = function (page) {
   const pages = ['dashboard','clientes','calendario','pagos','client-detail'];
   const prevPage = currentPage;
   const prevEl   = document.getElementById(`page-${prevPage}`);
+  const prevIdx  = NAV_ORDER.indexOf(prevPage);
+  const nextIdx  = NAV_ORDER.indexOf(page);
+  // goingBack: navigating to a page earlier in the nav order
+  const goingBack = prevIdx !== -1 && nextIdx !== -1 && nextIdx < prevIdx;
+
   currentPage = page;
   const navPage = ['dashboard','clientes','calendario','pagos'].includes(page) ? page : null;
   document.querySelectorAll('.nav-item[data-page]').forEach(el => {
@@ -326,18 +383,20 @@ window.navigate = function (page) {
       const el = document.getElementById(`page-${p}`);
       if (!el) return;
       if (p === page) {
-        el.classList.remove('hidden', 'page-fade-out');
+        el.classList.remove('hidden', 'page-fade-out', 'page-slide-back');
         el.classList.add('page-fade-in');
-        el.addEventListener('animationend', () => el.classList.remove('page-fade-in'), { once: true });
+        if (goingBack) el.classList.add('page-slide-back');
+        el.addEventListener('animationend', () => el.classList.remove('page-fade-in','page-slide-back'), { once: true });
       } else {
         el.classList.add('hidden');
-        el.classList.remove('page-fade-out', 'page-fade-in');
+        el.classList.remove('page-fade-out', 'page-fade-in', 'page-slide-back');
       }
     });
   };
   if (prevEl && !prevEl.classList.contains('hidden') && prevPage !== page) {
     prevEl.classList.add('page-fade-out');
-    setTimeout(doSwitch, 75);
+    if (goingBack) prevEl.classList.add('page-slide-back');
+    setTimeout(doSwitch, 90);
   } else { doSwitch(); }
 };
 
@@ -585,12 +644,12 @@ window.openClientDetail = function (id) {
 //  DASHBOARD
 // ═══════════════════════════════════════════════════════════
 // ─── Dashboard tab state ─────────────────────────────────
-let dashTab = 'hoy'; // 'hoy' | 'proximas'
+let dashTab = 'hoy'; // 'hoy' | 'proximas' | 'rendimiento'
 
 window.switchDashTab = function(tab) {
   dashTab = tab;
   document.querySelectorAll('.dash-tab').forEach(b => b.classList.remove('active'));
-  const btn = tab === 'hoy' ? $('tab-hoy') : $('tab-proximas');
+  const btn = tab === 'hoy' ? $('tab-hoy') : tab === 'proximas' ? $('tab-proximas') : $('tab-rendimiento');
   if (btn) btn.classList.add('active');
   renderDashTodayPanel();
 };
@@ -627,6 +686,8 @@ function renderDashTodayPanel() {
         </div>`;
       }).join('')}
     </div>`;
+  } else if (dashTab === 'rendimiento') {
+    renderDashRendimiento(todayEl);
   } else {
     // Próximas: sesiones de mañana en adelante
     const now = new Date(); now.setHours(0,0,0,0);
@@ -818,6 +879,96 @@ function renderDashboard() {
       </div>`;
     }).join('');
   }
+}
+
+// ── Dashboard Rendimiento (C3) ────────────────────────────
+function renderDashRendimiento(el) {
+  const now = new Date();
+  const thisY = now.getFullYear(); const thisM = now.getMonth();
+
+  // Sesiones completadas: este mes vs mes anterior
+  const completedAll = slots.filter(s => s.status === 'completed');
+  const completedThisMonth = completedAll.filter(s => {
+    const d = toDate(s.date); return d.getFullYear() === thisY && d.getMonth() === thisM;
+  });
+  const completedPrevMonth = completedAll.filter(s => {
+    const d = toDate(s.date);
+    const pm = new Date(thisY, thisM - 1, 1);
+    return d.getFullYear() === pm.getFullYear() && d.getMonth() === pm.getMonth();
+  });
+
+  // Tasa de cancelación (último mes)
+  const monthSlots = slots.filter(s => {
+    const d = toDate(s.date); return d.getFullYear() === thisY && d.getMonth() === thisM;
+  });
+  const cancelRate = monthSlots.length > 0
+    ? Math.round((monthSlots.filter(s => s.status === 'cancelled').length / monthSlots.length) * 100)
+    : 0;
+
+  // Ingresos por hora trabajada (sesiones completadas con duración este mes)
+  const ingMes = payments.filter(p => {
+    const d = toDate(p.date); return d.getFullYear() === thisY && d.getMonth() === thisM;
+  }).reduce((s, p) => s + (p.amount || 0), 0);
+  const horasMes = completedThisMonth.reduce((s, sl) => s + ((sl.duration || 60) / 60), 0);
+  const ingrPorHora = horasMes > 0 ? Math.round(ingMes / horasMes) : 0;
+
+  // Retención: clientes activos con ≥1 sesión completada en los últimos 30 días
+  const hace30 = new Date(now); hace30.setDate(hace30.getDate() - 30);
+  const activosTotal = clients.filter(c => c.active).length;
+  const retenidos = clients.filter(c => {
+    if (!c.active) return false;
+    return completedAll.some(s => s.clientId === c.id && toDate(s.date) >= hace30);
+  }).length;
+  const retencionPct = activosTotal > 0 ? Math.round((retenidos / activosTotal) * 100) : 0;
+
+  // Top 3 clientes más activos (por sesiones completadas totales)
+  const clienteSesiones = clients.filter(c => c.active).map(c => ({
+    name: c.name.split(' ')[0],
+    count: completedAll.filter(s => s.clientId === c.id).length
+  })).filter(x => x.count > 0).sort((a,b) => b.count - a.count).slice(0,3);
+
+  // Tendencia sesiones este mes vs anterior
+  const sesTrend = completedPrevMonth.length > 0
+    ? Math.round(((completedThisMonth.length - completedPrevMonth.length) / completedPrevMonth.length) * 100)
+    : null;
+  const sesTrendHtml = sesTrend !== null
+    ? `<span class="${sesTrend >= 0 ? 'perf-kpi-good' : 'perf-kpi-danger'}">${sesTrend >= 0 ? '▲' : '▼'} ${Math.abs(sesTrend)}% vs mes ant.</span>`
+    : '';
+
+  el.innerHTML = `
+    <div class="perf-grid">
+      <div class="perf-kpi">
+        <span class="perf-kpi-label">Sesiones este mes</span>
+        <span class="perf-kpi-value perf-kpi-accent">${completedThisMonth.length}</span>
+        <span class="perf-kpi-sub">${sesTrendHtml}</span>
+      </div>
+      <div class="perf-kpi">
+        <span class="perf-kpi-label">Cancelaciones</span>
+        <span class="perf-kpi-value ${cancelRate > 15 ? 'perf-kpi-danger' : cancelRate > 8 ? '' : 'perf-kpi-good'}">${cancelRate}%</span>
+        <span class="perf-kpi-sub">${monthSlots.filter(s=>s.status==='cancelled').length} de ${monthSlots.length} sesiones</span>
+      </div>
+      <div class="perf-kpi">
+        <span class="perf-kpi-label">€/hora trabajada</span>
+        <span class="perf-kpi-value perf-kpi-accent">${ingrPorHora > 0 ? ingrPorHora + '€' : '—'}</span>
+        <span class="perf-kpi-sub">${horasMes.toFixed(1)}h este mes</span>
+      </div>
+      <div class="perf-kpi">
+        <span class="perf-kpi-label">Retención 30 días</span>
+        <span class="perf-kpi-value ${retencionPct >= 70 ? 'perf-kpi-good' : retencionPct >= 40 ? '' : 'perf-kpi-danger'}">${retencionPct}%</span>
+        <span class="perf-kpi-sub">${retenidos} de ${activosTotal} clientes</span>
+      </div>
+    </div>
+    ${clienteSesiones.length > 0 ? `
+    <div class="perf-top-list" style="margin-top:10px">
+      <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Top clientes</div>
+      ${clienteSesiones.map((c, i) => `
+        <div class="perf-top-row">
+          <span class="perf-top-rank">${i+1}</span>
+          <span class="perf-top-name">${esc(c.name)}</span>
+          <span class="perf-top-val">${c.count} ses.</span>
+        </div>`).join('')}
+    </div>` : ''}
+  `;
 }
 
 // ── Quick complete from dashboard ──────────────────────────
@@ -1159,6 +1310,16 @@ function renderCalendarioMonth() {
     html += `<div class="cal-month-cell cal-month-cell--empty"></div>`;
   }
 
+  // Heat map: max sessions in a day this month (for scaling)
+  const dayCounts = [];
+  for (let d = 1; d <= lastDay.getDate(); d++) {
+    dayCounts.push(slots.filter(s => {
+      const sd = toDate(s.date);
+      return sd.getFullYear() === y && sd.getMonth() === m && sd.getDate() === d && s.status !== 'cancelled';
+    }).length);
+  }
+  const maxDayCount = Math.max(...dayCounts, 1);
+
   for (let day = 1; day <= lastDay.getDate(); day++) {
     const date = new Date(y, m, day);
     date.setHours(0,0,0,0);
@@ -1168,9 +1329,17 @@ function renderCalendarioMonth() {
       return sd.getFullYear() === y && sd.getMonth() === m && sd.getDate() === day;
     }).sort((a,b) => toDate(a.date)-toDate(b.date));
 
+    const activeCount = daySlots.filter(s => s.status !== 'cancelled').length;
+    const heatLevel = maxDayCount > 0
+      ? Math.ceil((activeCount / maxDayCount) * 4)
+      : 0;
+    const heatCls = activeCount > 0 ? ` cal-month-cell--heat-${Math.min(heatLevel, 4)}` : '';
+    const barW = activeCount > 0 ? Math.round((activeCount / maxDayCount) * 100) : 0;
+
     const dateStr = `${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-    html += `<div class="cal-month-cell${isT ? ' cal-month-cell--today' : ''}" onclick="handleMonthCellClick('${dateStr}')">
+    html += `<div class="cal-month-cell${isT ? ' cal-month-cell--today' : ''}${heatCls}" onclick="handleMonthCellClick('${dateStr}')">
       <div class="cal-month-cell-num${isT ? ' today-num' : ''}">${day}</div>
+      ${activeCount > 0 ? `<div class="cal-month-cell--heat-bar" style="width:${barW}%"></div>` : ''}
       <div class="cal-month-events">`;
 
     daySlots.slice(0, 3).forEach(s => {
@@ -2016,37 +2185,80 @@ window.setPagoSearch = function(v) { pagoSearchQuery = v.toLowerCase(); renderPa
 window.setPagoConceptFilter = function(v) { pagoConceptFilter = v; renderPagosList(); };
 window.setPagoClientFilter = function(v) { pagoClientFilter = v; renderPagosList(); };
 
+let revenueChartPeriod = 6; // 6 | 12
+
+window.setRevenueChartPeriod = function(p) {
+  revenueChartPeriod = p;
+  renderPagos();
+};
+
 function buildRevenueChart() {
   const now = new Date();
+  const n = revenueChartPeriod;
   const months = [];
-  for (let i = 5; i >= 0; i--) {
+  for (let i = n - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push({ y: d.getFullYear(), m: d.getMonth(), label: d.toLocaleDateString('es-ES', { month:'short' }) });
+    months.push({ y: d.getFullYear(), m: d.getMonth(), label: d.toLocaleDateString('es-ES', { month: 'short' }) });
   }
-  const totals = months.map(({ y, m }) =>
-    payments.filter(p => { const d = toDate(p.date); return d.getFullYear() === y && d.getMonth() === m; })
-      .reduce((s, p) => s + (p.amount || 0), 0)
-  );
-  const maxVal = Math.max(...totals, 1);
-  const W = 560; const H = 90; const PL = 8; const PR = 8; const PT = 10; const PB = 28;
+
+  const totals = months.map(({ y, m }) => {
+    const mp = payments.filter(p => { const d = toDate(p.date); return d.getFullYear() === y && d.getMonth() === m; });
+    const bonos  = mp.filter(p => p.concept === 'bono' || p.concept === 'bono_pareja').reduce((s, p) => s + (p.amount || 0), 0);
+    const sesion = mp.filter(p => ['sesion','mensual','individual'].includes(p.concept)).reduce((s, p) => s + (p.amount || 0), 0);
+    const otro   = mp.filter(p => !['bono','bono_pareja','sesion','mensual','individual'].includes(p.concept)).reduce((s, p) => s + (p.amount || 0), 0);
+    return { bonos, sesion, otro, total: bonos + sesion + otro };
+  });
+
+  const maxVal = Math.max(...totals.map(t => t.total), 1);
+  const W = 560; const H = 110; const PL = 8; const PR = 8; const PT = 14; const PB = 28;
   const barW = Math.floor((W - PL - PR) / months.length);
-  const chartW = barW * months.length;
+
   const bars = months.map(({ label }, i) => {
-    const v = totals[i];
-    const barH = Math.max(3, ((v / maxVal) * (H - PT - PB)));
+    const t = totals[i];
     const x = PL + i * barW;
-    const y = H - PB - barH;
     const isCurrent = months[i].y === now.getFullYear() && months[i].m === now.getMonth();
+    const totalH = Math.max(t.total > 0 ? 3 : 0, ((t.total / maxVal) * (H - PT - PB)));
+    if (t.total === 0) {
+      return `<text x="${x + barW/2}" y="${H - PB + 14}" text-anchor="middle" font-size="${n > 6 ? 9 : 10}" fill="var(--text3)" font-family="Syne,sans-serif">${label}</text>`;
+    }
+    const bonosH  = (t.bonos / t.total) * totalH;
+    const sesionH = (t.sesion / t.total) * totalH;
+    const otroH   = totalH - bonosH - sesionH;
+    const baseY   = H - PB - totalH;
+    const bx = x + 4; const bw = barW - 8;
     return `
-      <rect x="${x + 4}" y="${y}" width="${barW - 8}" height="${barH}" rx="4"
-        fill="${isCurrent ? 'var(--primary)' : 'var(--bg3)'}" opacity="${isCurrent ? 1 : 0.7}" />
-      <text x="${x + barW/2}" y="${H - PB + 14}" text-anchor="middle" font-size="10" fill="var(--text3)" font-family="Syne,sans-serif">${label}</text>
-      ${v > 0 ? `<text x="${x + barW/2}" y="${y - 4}" text-anchor="middle" font-size="9" fill="${isCurrent ? 'var(--primary)' : 'var(--text2)'}" font-family="JetBrains Mono,monospace">${v.toFixed(0)}€</text>` : ''}
+      ${otroH > 0   ? `<rect x="${bx}" y="${baseY}" width="${bw}" height="${otroH}" fill="${isCurrent ? '#47b8ff' : '#47b8ff44'}"/>` : ''}
+      ${sesionH > 0 ? `<rect x="${bx}" y="${baseY + otroH}" width="${bw}" height="${sesionH}" fill="${isCurrent ? '#a78bfa' : '#a78bfa44'}"/>` : ''}
+      ${bonosH > 0  ? `<rect x="${bx}" y="${baseY + otroH + sesionH}" width="${bw}" height="${bonosH}" rx="4" fill="${isCurrent ? 'var(--primary)' : 'var(--bg3)'}"/>` : ''}
+      <text x="${x + barW/2}" y="${H - PB + 14}" text-anchor="middle" font-size="${n > 6 ? 9 : 10}" fill="${isCurrent ? 'var(--text)' : 'var(--text3)'}" font-family="Syne,sans-serif">${label}</text>
+      <text x="${x + barW/2}" y="${baseY - 4}" text-anchor="middle" font-size="8" fill="${isCurrent ? 'var(--primary)' : 'var(--text2)'}" font-family="JetBrains Mono,monospace">${t.total.toFixed(0)}€</text>
     `;
   }).join('');
+
+  const totalPeriod = totals.reduce((s, t) => s + t.total, 0);
+  const bestIdx = totals.reduce((best, t, i) => t.total > totals[best].total ? i : best, 0);
+  const bestLabel = months[bestIdx]?.label || '—';
+
   return `<div class="revenue-chart-wrap">
-    <div class="revenue-chart-title">Ingresos últimos 6 meses</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <span class="revenue-chart-title">Ingresos histórico</span>
+      <div class="revenue-chart-tabs">
+        <button class="revenue-chart-tab${n===6?' active':''}" onclick="setRevenueChartPeriod(6)">6 meses</button>
+        <button class="revenue-chart-tab${n===12?' active':''}" onclick="setRevenueChartPeriod(12)">12 meses</button>
+      </div>
+    </div>
     <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" xmlns="http://www.w3.org/2000/svg">${bars}</svg>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;flex-wrap:wrap;gap:8px">
+      <div class="revenue-chart-legend">
+        <div class="revenue-legend-item"><div class="revenue-legend-dot" style="background:var(--primary)"></div> Bonos</div>
+        <div class="revenue-legend-item"><div class="revenue-legend-dot" style="background:#a78bfa"></div> Sesiones</div>
+        <div class="revenue-legend-item"><div class="revenue-legend-dot" style="background:#47b8ff"></div> Otro</div>
+      </div>
+      <div style="font-size:11px;color:var(--text2)">
+        Total: <strong style="color:var(--text)">${totalPeriod.toFixed(0)}€</strong>
+        ${totalPeriod > 0 ? `· Mejor mes: <strong style="color:var(--primary)">${bestLabel}</strong>` : ''}
+      </div>
+    </div>
   </div>`;
 }
 
